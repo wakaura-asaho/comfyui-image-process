@@ -29,7 +29,7 @@ The Color Artifact Normalizer is particularly useful for:
 * **Improving consistency** in images generated with models prone to producing desaturated pixels with unstable hues.
 * **Preserving transparency** in images that require alpha channel information while correcting color artifacts.
 
-![Example_workflow](https://github.com/wakaura-asaho/comfyui-dynamic-selector/blob/main/docs/example.png)
+![Example_workflow](https://github.com/wakaura-asaho/comfyui-image-process/blob/main/docs/example.png)
 
 To use the node in your workflow:
 
