@@ -1,7 +1,11 @@
-from comfy_api.latest import io
+from comfy_api.latest import io, ui
 import numpy as np
 from PIL import Image
+from PIL.PngImagePlugin import PngInfo
 import torch
+import folder_paths
+import os
+import json
 
 class ColorArtifactNormalizer(io.ComfyNode):
     """
@@ -114,9 +118,7 @@ class ColorArtifactNormalizer(io.ComfyNode):
         kernel_size = int(kwargs.get("kernal_size", 3))
         mask_input = kwargs.get("mask")
 
-        # Convert ComfyUI Tensor input to PIL Image
         if not isinstance(image, Image.Image):
-            # Handle torch tensor or numpy array
             try:
                 if isinstance(image, torch.Tensor):
                     image = image.cpu().numpy()
@@ -127,10 +129,9 @@ class ColorArtifactNormalizer(io.ComfyNode):
                 # Ensure single image (remove batch dimension if present)
                 if image.ndim == 4:
                     image = image[0]
-                # Convert from [0, 1] float to uint8
+                # Convert float images to uint8
                 if image.dtype == np.float32 or image.dtype == np.float64:
                     image = np.clip(image * 255, 0, 255).astype(np.uint8)
-                # Convert to PIL Image
                 if image.shape[2] == 4:
                     image = Image.fromarray(image, mode="RGBA")
                 elif image.shape[2] == 3:
@@ -153,7 +154,6 @@ class ColorArtifactNormalizer(io.ComfyNode):
             else:
                 alpha = np.array(mask_input, dtype=np.float32)
             
-            # Ensure single mask (remove batch dimension if present)
             if alpha.ndim == 3:
                 alpha = alpha[0]
             # Normalize to [0, 1] if needed
@@ -201,11 +201,104 @@ class ColorArtifactNormalizer(io.ComfyNode):
         output_tensor = torch.from_numpy(np.array(output_image, dtype=np.float32) / 255.0).unsqueeze(0)
         
         return io.NodeOutput(output_tensor, mask_tensor)
-    
+
+class SaveImageAdvanced(io.ComfyNode):
+    """
+    Saves images to disk with additional options for metadata and compression. Useful for saving AI-generated images with or without EXIF data, and for controlling compression levels.
+    """
+    output_dir = folder_paths.get_output_directory()
+    prefix_append = ""
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="SaveImageAdvanced",
+            display_name="Save Image Advanced",
+            category="Wakaura",
+            description="Saves image to disk with additional options for metadata and compression. Useful for saving AI-generated images with or without EXIF data, and for controlling compression levels.",
+            inputs=[
+                io.Image.Input(
+                    id="images",
+                    display_name="Images",
+                    tooltip="The images to be saved."
+                ),
+                io.Mask.Input(
+                    id="masks",
+                    display_name="Alpha Masks",
+                    tooltip="Optional alpha channel masks to clip the saved images. If provided, these masks will be applied to the corresponding images before saving.",
+                    optional=True
+                ),
+                io.Boolean.Input(
+                    id="disable_metadata",
+                    display_name="Disable Metadata",
+                    tooltip="If true, no metadata will be saved with the image. If false, prompt and extra_pnginfo from the hidden state will be saved as text chunks.",
+                    default=True
+                ),
+                io.Boolean.Input(
+                    id="join_alpha",
+                    display_name="Join Alpha Channel",
+                    tooltip="If true, the alpha masks will be joined with the images as an alpha channel before saving. If false, the alpha masks will be ignored and not included in the saved images.",
+                    default=False
+                ),
+                io.Int.Input(
+                    id="compress_level",
+                    display_name="Compression Level",
+                    tooltip="The compression level to use when saving images (0-9). Higher values result in smaller file sizes but longer save times.",
+                    default=4,
+                    min=0,
+                    max=9
+                ),
+                io.String.Input(
+                    id="filename_prefix",
+                    display_name="Filename Prefix",
+                    tooltip="Prefix for the saved image filenames. Each image will be saved as {prefix}_{index}.png.",
+                    default="ComfyUI"
+                )
+            ],
+            hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
+            is_output_node=True,
+        )
+
+    @classmethod
+    def execute(cls, images: torch.Tensor, masks: torch.Tensor | None = None, filename_prefix="ComfyUI", disable_metadata=True, join_alpha=False, compress_level=4, **kwargs) -> io.NodeOutput:
+        filename_prefix += cls.prefix_append
+        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0])
+
+        results = []
+        metadata = not disable_metadata and ui.ImageSaveHelper._create_png_metadata(cls) or None
+        for (batch_number, image) in enumerate(images):
+            i = 255. * image.cpu().numpy()
+            img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
+
+            if join_alpha and masks is not None:
+                # Clamp batch index so a single mask broadcasts across all images
+                mask_index = min(batch_number, masks.shape[0] - 1)
+                mask = masks[mask_index].cpu().numpy()   # shape: (H, W), range [0.0, 1.0]
+
+                # Resize mask to match the image dimensions if they differ
+                if mask.shape != (img.height, img.width):
+                    mask_pil = Image.fromarray((mask * 255).astype(np.uint8), mode="L")
+                    mask_pil = mask_pil.resize((img.width, img.height), Image.LANCZOS)
+                else:
+                    mask_pil = Image.fromarray((mask * 255).astype(np.uint8), mode="L")
+
+                img = img.convert("RGBA")
+                img.putalpha(mask_pil)
+
+            filename_with_batch_num = filename.replace("%batch_num%", str(batch_number))
+            file = f"{filename_with_batch_num}_{counter:05}_.png"
+            img.save(os.path.join(full_output_folder, file), pnginfo=metadata, compress_level=compress_level)
+            results.append(ui.SavedResult(file, subfolder, io.FolderType.output))
+            counter += 1
+
+        return io.NodeOutput(ui=ui.SavedImages(results))
+
 NODE_CLASS_MAPPINGS = {
     "ColorArtifactNormalizer": ColorArtifactNormalizer,
+    "SaveImageAdvanced": SaveImageAdvanced,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "ColorArtifactNormalizer": "Color Artifact Normalizer",
+    "SaveImageAdvanced": "Save Image Advanced",
 }

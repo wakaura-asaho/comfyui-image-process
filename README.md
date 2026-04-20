@@ -10,7 +10,7 @@ A collection of image processing nodes designed to enhance and refine AI-generat
 
 ### 1. Color Artifact Normalizer
 
-An intelligent image processing node that fixes achromatic color instability commonly found in AI-generated images.
+An image processing node that fixes achromatic color instability commonly found in AI-generated images.
 
 * **Artifact Detection:** Automatically identifies pixels with near-zero saturation that represent color artifacts.
 * **Saturation Threshold:** Adjustable threshold parameter to fine-tune which pixels are considered artifacts (range: 0.0 - 1.0).
@@ -19,11 +19,19 @@ An intelligent image processing node that fixes achromatic color instability com
 * **Alpha Channel Preservation:** Optionally preserve the alpha channel during processing for transparent images.
 * **Dual Output:** Returns both the processed image and alpha mask separately for maximum flexibility.
 
+### 2. Save Image Advanced
+
+An extended node that support outputing the images with alpha channels and metadatas.
+
+* **Disable Metadata:** Normally, every image sent to the output folder will have the workflow embedded. You can toggle this option to discard the data and free up some disk space.
+* **Join Alpha Channel:** Effectively the same as the official node `Join Image with Alpha`. You can connect a mask to the node to clip the image.
+* **Compression Level:** Determine how hard the encoder works to shrink the file size using the lossless DEFLATE algorithm (range: 0 - 9).
+
 ---
 
 ## Example Usage
 
-The Color Artifact Normalizer is particularly useful for:
+The `Color Artifact Normalizer` is particularly useful for:
 
 * **Removing color noise** from AI-generated images that exhibit hue instability in near-white or near-black regions.
 * **Improving consistency** in images generated with models prone to producing desaturated pixels with unstable hues.
@@ -41,6 +49,14 @@ To use the node in your workflow:
 6. Toggle **Preserve Alpha** to keep or discard the alpha channel in the output.
 
 The node will output the corrected image and its alpha channel separately.
+
+The `Save Image Advanced` can be used at the end of the workflow to save your images with additional preprocessing tweaks:
+
+![Example_workflow](https://github.com/wakaura-asaho/comfyui-image-process/blob/main/docs/save_image_adv.png)
+
+The workflow screenshot above uses a custom node to remove the background from the generated image, sending the mask to the node to save the image with an alpha channel.
+
+When the `Disable Metadata` is set to True, you will get a smaller file due to discarded metadata, and ComfyUI will no longer be able to read the workflow from the image. 
 
 ---
 
