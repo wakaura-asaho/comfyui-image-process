@@ -1,6 +1,6 @@
-# ComfyUI-Image-Process
+# ComfyUI Image Process
 
-A collection of image processing nodes designed to enhance and refine AI-generated images in ComfyUI workflows. (may add more nodes to this repo in the future)
+A collection of image-processing nodes designed to enhance and refine AI-generated images within ComfyUI workflows. (may add more nodes to this repo in the future)
 
 <p align="center">
 <img src="https://github.com/wakaura-asaho/comfyui-image-process/blob/main/docs/logo.png" alt="Logo" style="display: block; margin: 0 auto; text-align: center;">
@@ -10,7 +10,7 @@ A collection of image processing nodes designed to enhance and refine AI-generat
 
 ### 1. Color Artifact Normalizer
 
-An image processing node that fixes achromatic color instability commonly found in AI-generated images.
+An image-processing node that corrects achromatic color instability commonly found in AI-generated images.
 
 * **Artifact Detection:** Automatically identifies pixels with near-zero saturation that represent color artifacts.
 * **Saturation Threshold:** Adjustable threshold parameter to fine-tune which pixels are considered artifacts (range: 0.0 - 1.0).
@@ -21,7 +21,7 @@ An image processing node that fixes achromatic color instability commonly found 
 
 ### 2. Save Image Advanced
 
-An extended node that support outputing the images with alpha channels and metadatas.
+An extended node that supports outputting the images with alpha channels and metadata.
 
 * **Disable Metadata:** Normally, every image sent to the output folder will have the workflow embedded. You can toggle this option to discard the data and free up some disk space.
 * **Join Alpha Channel:** Effectively the same as the official node `Join Image with Alpha`. You can connect a mask to the node to clip the image.
