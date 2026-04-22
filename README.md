@@ -25,7 +25,9 @@ An extended node that support outputing the images with alpha channels and metad
 
 * **Disable Metadata:** Normally, every image sent to the output folder will have the workflow embedded. You can toggle this option to discard the data and free up some disk space.
 * **Join Alpha Channel:** Effectively the same as the official node `Join Image with Alpha`. You can connect a mask to the node to clip the image.
-* **Compression Level:** Determine how hard the encoder works to shrink the file size using the lossless DEFLATE algorithm (range: 0 - 9).
+* **Compression Level:** The compression level to use when saving images as PNG (0-9).
+* **Quality:** The quality to use when saving images as JPEG or WebP (1-100).
+* **Format:** The format to save the image in. (Currently supports: `JPG`, `PNG`, `WebP`)
 
 ---
 

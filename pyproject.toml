@@ -23,5 +23,5 @@ Repository = "https://github.com/wakaura-asaho/comfyui-image-process"
 [tool.comfy]
 PublisherId = "wakaura"
 DisplayName = "ComfyUI-Image-Process"
-Icon = ""
+Icon = "https://github.com/wakaura-asaho/comfyui-image-process/blob/main/docs/logo_notitle.png"
 requires-comfyui = ">=0.12.3"
