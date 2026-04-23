@@ -36,6 +36,7 @@ class ColorArtifactNormalizer(io.ComfyNode):
                     id="mask",
                     display_name="Alpha Mask",
                     tooltip="Optional alpha channel mask. If provided and preserve_alpha is True, this mask will be used as the alpha channel.",
+                    optional=True
                 ),
                 io.Boolean.Input(
                     id="smooth",
@@ -51,7 +52,7 @@ class ColorArtifactNormalizer(io.ComfyNode):
                     round=0.01,
                     default=0.08,
                     max=1.0,
-                    min=0.0,
+                    min=0.0
                 ),
                 io.Int.Input(
                     id="kernal_size",
