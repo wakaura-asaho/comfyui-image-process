@@ -1,34 +1,46 @@
 import { app } from "/scripts/app.js";
 
-function toggleQualityWidgets(qualityWidget, compressWidget, isPNG) {
+const qualityWidgetsConfig = {
+    "quality": ["jpg", "webp"],
+    "compress_level": ["png"],
+    "tiff_compression": ["tiff"],
+};
+
+function applyWidgetStyle(widget, disabled) {
     const dark_grey = "#444";
     const light_grey = "#666";
 
-    qualityWidget.disabled = isPNG;
-    compressWidget.disabled = !isPNG;
+    const color = disabled ? dark_grey : undefined;
+    const textColor = disabled ? light_grey : undefined;
 
-    const applyStyle = (widget, disabled) => {
-        const color = disabled ? dark_grey : undefined;
-        const textColor = disabled ? light_grey : undefined;
+    widget.disabled = disabled;
+    if (widget.options) {
+        widget.options.color = color;
+        widget.options.text_color = textColor;
+    }
 
-        if (widget.options) {
-            widget.options.color = color;
-            widget.options.text_color = textColor;
-        }
+    try { widget.color = color; } catch (e) { }
+    try { widget.text_color = textColor; } catch (e) { }
 
-        try { widget.color = color; } catch (e) {}
-        try { widget.text_color = textColor; } catch (e) {}
-
-        widget.label = `${widget.original_displayName} ${disabled ? "(Disabled)" : ""}`;
-    };
-
-    applyStyle(qualityWidget, isPNG);
-    applyStyle(compressWidget, !isPNG);
+    widget.label = `${widget.original_displayName} ${disabled ? "(Disabled)" : ""}`;
 }
 
-function initOriginalName (widget) {
-    widget.original_displayName = widget.name.replace("_", " ").replace(/\b\w/g, char => char.toUpperCase());
-    widget.label = widget.original_displayName;
+function toggleQualityWidgets(widgets, qualityType) {
+    for (const name in qualityWidgetsConfig) {
+        const widget = widgets[name];
+        if (widget) {
+            const enabledTypes = qualityWidgetsConfig[name];
+            const isDisabled = !enabledTypes.includes(qualityType);
+            applyWidgetStyle(widget, isDisabled);
+        }
+    }
+}
+
+function initOriginalName(widget) {
+    if (widget) {
+        widget.original_displayName = widget.name.replace(/_/g, " ").replace(/\b\w/g, char => char.toUpperCase());
+        widget.label = widget.original_displayName;
+    }
 }
 
 app.registerExtension({
@@ -39,32 +51,31 @@ app.registerExtension({
             nodeType.prototype.onNodeCreated = function () {
                 const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
 
-                const formatWidget = this.widgets.find((w) => w.name === "format");
-                const qualityWidget = this.widgets.find((w) => w.name === "quality");
-                const compressWidget = this.widgets.find((w) => w.name === "compress_level");
+                const widgets = this.widgets.reduce((acc, w) => {
+                    acc[w.name] = w;
+                    return acc;
+                }, {});
 
-                if (formatWidget && qualityWidget && compressWidget) {
-                    initOriginalName(formatWidget);
-                    initOriginalName(qualityWidget);
-                    initOriginalName(compressWidget);
+                const formatWidget = widgets["format"];
+
+                if (formatWidget) {
+                    [formatWidget, widgets["quality"], widgets["compress_level"], widgets["tiff_compression"]].forEach(initOriginalName);
 
                     const updateWidgets = () => {
-                        const isPNG = formatWidget.value === "png";
-                        toggleQualityWidgets(qualityWidget, compressWidget, isPNG);
+                        const qualityType = formatWidget.value;
+                        toggleQualityWidgets(widgets, qualityType);
                         this.setDirtyCanvas(true, true);
                     };
 
-                    const callback = formatWidget.callback;
+                    const originalCallback = formatWidget.callback;
                     formatWidget.callback = function () {
-                        const result = callback ? callback.apply(this, arguments) : undefined;
+                        const result = originalCallback ? originalCallback.apply(this, arguments) : undefined;
                         updateWidgets();
                         return result;
                     };
 
-                    // Initial state check
-                    setTimeout(() => updateWidgets(), 0);
+                    setTimeout(updateWidgets, 0);
                 }
-
                 return r;
             };
         }

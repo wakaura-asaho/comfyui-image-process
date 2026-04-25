@@ -5,6 +5,8 @@ from PIL.PngImagePlugin import PngInfo
 import torch
 import folder_paths
 import os
+import random
+import time
 import json
 
 class ColorArtifactNormalizer(io.ComfyNode):
@@ -214,6 +216,8 @@ class SaveImageAdvanced(io.ComfyNode):
 
     debug_header = "[ComfyUI-SaveImageAdvanced]"
 
+    web_unsupported_preview_formats = ["tiff"]
+
     @classmethod
     def define_schema(cls):
         return io.Schema(
@@ -246,6 +250,15 @@ class SaveImageAdvanced(io.ComfyNode):
                     default=False
                 ),
                 io.Int.Input(
+                    id="dpi",
+                    display_name="DPI",
+                    tooltip="The DPI to use when saving images.",
+                    default=300,
+                    min=1,
+                    max=600,
+                    display_mode=io.NumberDisplay.slider
+                ),
+                io.Int.Input(
                     id="compress_level",
                     display_name="Compression Level",
                     tooltip="The compression level to use when saving images as PNG (0-9).",
@@ -264,10 +277,17 @@ class SaveImageAdvanced(io.ComfyNode):
                     display_mode=io.NumberDisplay.slider
                 ),
                 io.Combo.Input(
+                    id="tiff_compression",
+                    display_name="TIFF Compression",
+                    tooltip="The compression to use when saving images as TIFF.",
+                    options=["none", "tiff_lzw", "tiff_deflate", "tiff_adobe_deflate", "packbits", "jpeg", "tiff_jpeg", "tiff_ccitt"],
+                    default="none"
+                ),
+                io.Combo.Input(
                     id="format",
                     display_name="Format",
                     tooltip="The format to save the image in.",
-                    options=["png", "jpg", "webp"],
+                    options=["png", "jpg", "webp", "tiff"],
                     default="png"
                 ),
                 io.String.Input(
@@ -275,6 +295,12 @@ class SaveImageAdvanced(io.ComfyNode):
                     display_name="Filename Prefix",
                     tooltip="Prefix for the saved image filenames.\nEach image will be saved as {prefix}_{index}.{format}.",
                     default="ComfyUI"
+                ),
+                io.Boolean.Input(
+                    id="save_to_input_folder",
+                    display_name="Save to Input Folder",
+                    tooltip="Whether to sync the image to the input folder.\nThe file name and target directory will be the same as the output folder.",
+                    default=False
                 )
             ],
             hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
@@ -282,11 +308,27 @@ class SaveImageAdvanced(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, images: torch.Tensor, masks: torch.Tensor | None = None, filename_prefix="ComfyUI", disable_metadata=True, join_alpha=False, compress_level=4, format="png", quality=90, **kwargs) -> io.NodeOutput:
+    def execute(
+        cls, images: torch.Tensor,
+        masks: torch.Tensor | None = None,
+        filename_prefix="ComfyUI",
+        disable_metadata=True,
+        join_alpha=False,
+        compress_level=4,
+        tiff_compression="none",
+        format="png",
+        quality=90,
+        save_to_input_folder=False,
+        dpi=300,
+        **kwargs
+    ) -> io.NodeOutput:
         filename_prefix += cls.prefix_append
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0])
+        full_input_folder = os.path.join(folder_paths.get_input_directory(), subfolder)
+        temp_folder = folder_paths.get_temp_directory()
 
         results = []
+        tmp_results = [] # For special file format that the web cannot display properly.
         metadata = not disable_metadata and ui.ImageSaveHelper._create_png_metadata(cls) or None
         for (batch_number, image) in enumerate(images):
             i = 255. * image.cpu().numpy()
@@ -317,20 +359,45 @@ class SaveImageAdvanced(io.ComfyNode):
             if format == "jpg":
                 img = img.convert("RGB")
                 ext = "jpg"
-                save_kwargs = {"quality": quality, "optimize": True}
+                save_kwargs = {"quality": quality, "optimize": True, "dpi": (dpi, dpi)}
             elif format == "webp":
                 ext = "webp"
-                save_kwargs = {"quality": quality, "lossless": False}
+                save_kwargs = {"quality": quality, "lossless": False, "dpi": (dpi, dpi)}
+            elif format == "tiff":
+                ext = "tiff"
+                # CCITT compression (Group 3/4 fax) only supports 1-bit bilevel
+                # images. Convert to mode "1" to avoid "encoder error -2".
+                if tiff_compression == "tiff_ccitt":
+                    if img.mode != "1":
+                        print(
+                            f"{cls.debug_header} tiff_ccitt compression requires a bilevel (1-bit) image. "
+                            f"Converting from {img.mode} to mode '1'. Color information will be lost."
+                        )
+                        img = img.convert("1")
+                save_kwargs = {"compression": tiff_compression, "dpi": (dpi, dpi)}
             else:
                 ext = "png"
-                save_kwargs = {"pnginfo": metadata, "compress_level": compress_level}
+                save_kwargs = {"pnginfo": metadata, "compress_level": compress_level, "dpi": (dpi, dpi)}
 
             file = f"{filename_with_batch_num}_{counter:05}_.{ext}"
+            if not os.path.exists(full_output_folder):
+                os.makedirs(full_output_folder)
             img.save(os.path.join(full_output_folder, file), **save_kwargs)
+            if (save_to_input_folder):
+                if not os.path.exists(full_input_folder):
+                    os.makedirs(full_input_folder)
+                target_file = os.path.join(full_input_folder, file)
+                if os.path.exists(target_file):
+                    target_file = os.path.join(full_input_folder, f"{filename_with_batch_num}_{counter:05}_{int(time.time())}.{ext}")
+                img.save(target_file, **save_kwargs)
+            if (format in cls.web_unsupported_preview_formats):
+                tmp_file = "ComfyUI_temp_" + ''.join(random.choice("abcdefghijklmnopqrstupvxyz") for _ in range(5)) + ".png"
+                img.save(os.path.join(temp_folder, tmp_file))
+                tmp_results.append(ui.SavedResult(tmp_file, "", io.FolderType.temp))
             results.append(ui.SavedResult(file, subfolder, io.FolderType.output))
             counter += 1
 
-        return io.NodeOutput(ui=ui.SavedImages(results))
+        return io.NodeOutput(ui=(ui.SavedImages(tmp_results) if format in cls.web_unsupported_preview_formats else ui.SavedImages(results)))
 
 NODE_CLASS_MAPPINGS = {
     "ColorArtifactNormalizer": ColorArtifactNormalizer,

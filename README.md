@@ -27,7 +27,18 @@ An extended node that supports outputting the images with alpha channels and met
 * **Join Alpha Channel:** Effectively the same as the official node `Join Image with Alpha`. You can connect a mask to the node to clip the image.
 * **Compression Level:** The compression level to use when saving images as PNG (0-9).
 * **Quality:** The quality to use when saving images as JPEG or WebP (1-100).
-* **Format:** The format to save the image in. (Currently supports: `JPG`, `PNG`, `WebP`)
+* **DPI:** Set the DPI (dots per inch) metadata embedded in the saved file (range: 1–600, default: 300). Applies to all formats.
+* **TIFF Compression:** When saving as TIFF, choose the compression algorithm: `none`, `tiff_lzw`, `tiff_deflate`, `tiff_adobe_deflate`, `packbits`, `jpeg`, `tiff_jpeg`, or `tiff_ccitt`.
+* **Format:** The format to save the image in. (Currently supports: `JPG`, `PNG`, `WebP`, `TIFF`)
+* **Save to Input Folder:** When enabled, the saved file is also copied to the ComfyUI input folder (same filename and subfolder), making it immediately available for use in subsequent workflows.
+
+> [!WARNING]
+> If choose to save as TIFF file, ComfyUI may not be able to display the image properly.
+> The image shown in the preview pane is a copy of the PNG version of the image. The actual file saved will be in the format and the folder path you choose.
+
+> [!TIP]
+> `tiff_ccitt` is only useful for scanned documents, fax images, or text/line-art that is already black and white.
+> For photographic content, you might want to use `tiff_lzw`, `tiff_deflate`, or `tiff_adobe_deflate` instead.
 
 ---
 
