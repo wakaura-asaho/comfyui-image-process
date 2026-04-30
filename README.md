@@ -17,17 +17,41 @@ An image-processing node that corrects achromatic color instability commonly fou
 * **Smart Normalization:** Snaps the hue of artifact pixels to 0 and zeroes out saturation, converting them to neutral grey.
 * **Optional Smoothing:** Apply a configurable smoothing filter to blend corrected areas seamlessly with the rest of the image.
 * **Alpha Channel Preservation:** Optionally preserve the alpha channel during processing for transparent images.
+* **Invert Alpha:** Toggle to invert the alpha channel before processing or outputting.
 * **Dual Output:** Returns both the processed image and alpha mask separately for maximum flexibility.
 
 ### 2. Save Image Advanced
 
 An extended node that supports outputting the images with alpha channels and metadata.
 
-* **Disable Metadata:** Normally, every image sent to the output folder will have the workflow embedded. You can toggle this option to discard the data and free up some disk space.
-* **Join Alpha Channel:** Effectively the same as the official node `Join Image with Alpha`. You can connect a mask to the node to clip the image.
-* **Compression Level:** The compression level to use when saving images as PNG (0-9).
-* **Quality:** The quality to use when saving images as JPEG or WebP (1-100).
-* **Format:** The format to save the image in. (Currently supports: `JPG`, `PNG`, `WebP`)
+* **Disable Metadata:** Toggles whether to embed the workflow metadata. Disabling it reduces file size but removes workflow readability.
+* **Join Alpha Channel:** Effectively the same as the official node `Join Image with Alpha`. Connect a mask to clip the image.
+* **Invert Alpha:** Toggle to invert the alpha channel before saving.
+* **Compression Level:** The compression level for PNG (0-9).
+* **Quality:** The quality for JPEG or WebP (1-100).
+* **DPI:** Set the DPI metadata (range: 1–600, default: 300). Applies to all formats.
+* **TIFF Compression:** Choose from multiple algorithms (LZW, Deflate, CCITT, etc.) when saving as TIFF.
+* **Format:** Supports `JPG`, `PNG`, `WebP`, `TIFF`, and `BMP`.
+* **Bit Depth:** Choose between `24bit` or `32bit` for BMP files (32bit supports alpha).
+* **Save to Input Folder:** Automatically copies the saved file to the ComfyUI input folder for immediate reuse.
+
+### 3. Dedicated Format Savers
+
+Specialized nodes for specific formats, offering both simplified and advanced controls.
+
+![Example_workflow](https://github.com/wakaura-asaho/comfyui-image-process/blob/main/docs/save_image_simple.png)
+
+* **JPG Savers:** `Save Image (JPG)` for quick saves; `Save Image Advanced (JPG)` with DPI and EXIF control.
+* **BMP Savers:** `Save Image (BMP)` for standard saves; `Save Image Advanced (BMP)` with 32-bit alpha and DPI support.
+* **TIFF Savers:** `Save Image (TIFF)` for standard saves; `Save Image Advanced (TIFF)` with comprehensive compression options and EXIF metadata.
+
+> [!WARNING]
+> If choose to save as TIFF file, ComfyUI may not be able to display the image properly.
+> The image shown in the preview pane is a copy of the PNG version of the image. The actual file saved will be in the format and the folder path you choose.
+
+> [!TIP]
+> `tiff_ccitt` is only useful for scanned documents, fax images, or text/line-art that is already black and white.
+> For photographic content, you might want to use `tiff_lzw`, `tiff_deflate`, or `tiff_adobe_deflate` instead.
 
 ---
 

@@ -1,0 +1,488 @@
+{
+  "id": "cd26beed-7d0b-48f5-8c34-efc7e9d7e6ba",
+  "revision": 0,
+  "last_node_id": 29,
+  "last_link_id": 51,
+  "nodes": [
+    {
+      "id": 13,
+      "type": "LoadImage",
+      "pos": [
+        -960,
+        530
+      ],
+      "size": [
+        282.798828125,
+        314.00000000000006
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            30
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": [
+            37
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.17.2",
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "Ulla.png",
+        "image"
+      ]
+    },
+    {
+      "id": 21,
+      "type": "SaveImageAdvancedJPG",
+      "pos": [
+        230,
+        170
+      ],
+      "size": [
+        289.296484375,
+        366
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "Images",
+          "name": "images",
+          "type": "IMAGE",
+          "link": 43
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "comfyui-image-process",
+        "ver": "adebd2d99b3d98ffc67f86fd510ebac62aa73cb1",
+        "Node name for S&R": "SaveImageAdvancedJPG"
+      },
+      "widgets_values": [
+        false,
+        "ComfyUI",
+        300,
+        95,
+        false
+      ]
+    },
+    {
+      "id": 28,
+      "type": "SaveImageAdvancedBMP",
+      "pos": [
+        230,
+        590
+      ],
+      "size": [
+        292.6666015625,
+        410
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "Images",
+          "name": "images",
+          "type": "IMAGE",
+          "link": 48
+        },
+        {
+          "label": "Alpha Masks",
+          "name": "masks",
+          "shape": 7,
+          "type": "MASK",
+          "link": 49
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "comfyui-image-process",
+        "ver": "adebd2d99b3d98ffc67f86fd510ebac62aa73cb1",
+        "Node name for S&R": "SaveImageAdvancedBMP"
+      },
+      "widgets_values": [
+        "24bit",
+        true,
+        false,
+        "ComfyUI",
+        300,
+        false
+      ]
+    },
+    {
+      "id": 26,
+      "type": "GetImageSize",
+      "pos": [
+        -380,
+        690
+      ],
+      "size": [
+        190,
+        120
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 38
+        }
+      ],
+      "outputs": [
+        {
+          "name": "width",
+          "type": "INT",
+          "links": [
+            39
+          ]
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "links": [
+            40
+          ]
+        },
+        {
+          "name": "batch_size",
+          "type": "INT",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.17.2",
+        "Node name for S&R": "GetImageSize"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 20,
+      "type": "ImageScaleBy",
+      "pos": [
+        -670,
+        530
+      ],
+      "size": [
+        270,
+        82
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 30
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            38,
+            43,
+            45,
+            48,
+            50
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.17.2",
+        "Node name for S&R": "ImageScaleBy"
+      },
+      "widgets_values": [
+        "nearest-exact",
+        1.5
+      ]
+    },
+    {
+      "id": 29,
+      "type": "SaveImageAdvanced",
+      "pos": [
+        230,
+        1560
+      ],
+      "size": [
+        290,
+        410
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "Images",
+          "name": "images",
+          "type": "IMAGE",
+          "link": 50
+        },
+        {
+          "label": "Alpha Masks",
+          "name": "masks",
+          "shape": 7,
+          "type": "MASK",
+          "link": 51
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "comfyui-image-process",
+        "ver": "adebd2d99b3d98ffc67f86fd510ebac62aa73cb1",
+        "Node name for S&R": "SaveImageAdvanced"
+      },
+      "widgets_values": [
+        true,
+        false,
+        false,
+        300,
+        4,
+        90,
+        "none",
+        "png",
+        "ComfyUI",
+        false
+      ]
+    },
+    {
+      "id": 25,
+      "type": "ResizeImageMaskNode",
+      "pos": [
+        -180,
+        640
+      ],
+      "size": [
+        270,
+        154
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "input",
+          "type": "IMAGE,MASK",
+          "link": 37
+        },
+        {
+          "name": "resize_type.width",
+          "type": "INT",
+          "widget": {
+            "name": "resize_type.width"
+          },
+          "link": 39
+        },
+        {
+          "name": "resize_type.height",
+          "type": "INT",
+          "widget": {
+            "name": "resize_type.height"
+          },
+          "link": 40
+        }
+      ],
+      "outputs": [
+        {
+          "name": "resized",
+          "type": "MASK",
+          "links": [
+            44,
+            49,
+            51
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.17.2",
+        "Node name for S&R": "ResizeImageMaskNode"
+      },
+      "widgets_values": [
+        "scale dimensions",
+        512,
+        512,
+        "disabled",
+        "area"
+      ]
+    },
+    {
+      "id": 24,
+      "type": "SaveImageAdvancedTIFF",
+      "pos": [
+        231,
+        1063
+      ],
+      "size": [
+        291.2447265625,
+        434
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "Images",
+          "name": "images",
+          "type": "IMAGE",
+          "link": 45
+        },
+        {
+          "label": "Alpha Masks",
+          "name": "masks",
+          "shape": 7,
+          "type": "MASK",
+          "link": 44
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "comfyui-image-process",
+        "ver": "adebd2d99b3d98ffc67f86fd510ebac62aa73cb1",
+        "Node name for S&R": "SaveImageAdvancedTIFF"
+      },
+      "widgets_values": [
+        false,
+        true,
+        true,
+        "ComfyUI",
+        300,
+        "none",
+        false
+      ]
+    }
+  ],
+  "links": [
+    [
+      30,
+      13,
+      0,
+      20,
+      0,
+      "IMAGE"
+    ],
+    [
+      37,
+      13,
+      1,
+      25,
+      0,
+      "MASK"
+    ],
+    [
+      38,
+      20,
+      0,
+      26,
+      0,
+      "IMAGE"
+    ],
+    [
+      39,
+      26,
+      0,
+      25,
+      1,
+      "INT"
+    ],
+    [
+      40,
+      26,
+      1,
+      25,
+      2,
+      "INT"
+    ],
+    [
+      43,
+      20,
+      0,
+      21,
+      0,
+      "IMAGE"
+    ],
+    [
+      44,
+      25,
+      0,
+      24,
+      1,
+      "MASK"
+    ],
+    [
+      45,
+      20,
+      0,
+      24,
+      0,
+      "IMAGE"
+    ],
+    [
+      48,
+      20,
+      0,
+      28,
+      0,
+      "IMAGE"
+    ],
+    [
+      49,
+      25,
+      0,
+      28,
+      1,
+      "MASK"
+    ],
+    [
+      50,
+      20,
+      0,
+      29,
+      0,
+      "IMAGE"
+    ],
+    [
+      51,
+      25,
+      0,
+      29,
+      1,
+      "MASK"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "workflowRendererVersion": "LG",
+    "ds": {
+      "scale": 0.8264462809917359,
+      "offset": [
+        1304.5182839162924,
+        -185.2303523734739
+      ]
+    },
+    "frontendVersion": "1.41.20"
+  },
+  "version": 0.4
+}
