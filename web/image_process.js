@@ -100,10 +100,10 @@ app.registerExtension({
                     };
 
                     setTimeout(updateWidgets, 0);
-                }
+                };
                 return r;
             };
-        }
+        };
     }
 });
 
@@ -123,10 +123,11 @@ app.registerExtension({
                 const bit_depth_widget = widgets["bit_depth"];
 
                 if (bit_depth_widget) {
-                    [bit_depth_widget, widgets["join_alpha"], widgets["invert_alpha"]].forEach(initOriginalName);
+                    [bit_depth_widget, widgets["join_alpha"], widgets["invert_alpha"]].forEach(w => initOriginalName(w));
 
                     const updateWidgets = () => {
-                        toggleQualityWidgets(widgets, bit_depth_widget.value, alphaExclusiveConfig);
+                        const bits = bit_depth_widget.value
+                        toggleQualityWidgets(widgets, bits, alphaExclusiveConfig);
                         this.setDirtyCanvas(true, true);
                     };
 
@@ -138,10 +139,9 @@ app.registerExtension({
                     };
 
                     setTimeout(updateWidgets, 0);
-                }
-
+                };
                 return r;
-            }
-        }
+            };
+        };
     }
 });
