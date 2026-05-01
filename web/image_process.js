@@ -2,11 +2,12 @@ import { app } from "/scripts/app.js";
 
 const qualityWidgetsConfig = {
     "disable_metadata": ["png", "jpg", "webp", "tiff"],
-    "join_alpha": ["png", "webp", "tiff", "bmp"],
-    "invert_alpha": ["png", "webp", "tiff", "bmp"],
+    "join_alpha": ["png", "webp", "tiff", "bmp", "tga"],
+    "invert_alpha": ["png", "webp", "tiff", "bmp", "tga"],
     "quality": ["jpg", "webp"],
     "compress_level": ["png"],
     "tiff_compression": ["tiff"],
+    "tga_rle": ["tga"],
 };
 
 const alphaExclusiveConfig = {
@@ -44,9 +45,16 @@ function toggleQualityWidgets(widgets, value, config) {
     }
 }
 
-function initOriginalName(widget) {
+function initOriginalName(widget, capitalFirst = true, customName = "") {
     if (widget) {
-        widget.original_displayName = widget.name.replace(/_/g, " ").replace(/\b\w/g, char => char.toUpperCase());
+        if (customName !== "")
+            widget.original_displayName = customName
+        else {
+            if (capitalFirst)
+                widget.original_displayName = widget.name.replace(/_/g, " ").replace(/\b\w/g, char => char.toUpperCase());
+            else
+                widget.original_displayName = widget.name;
+        }
         widget.label = widget.original_displayName;
     }
 }
@@ -73,9 +81,10 @@ app.registerExtension({
                         widgets["join_alpha"],
                         widgets["invert_alpha"],
                         widgets["quality"],
-                        widgets["compress_level"],
-                        widgets["tiff_compression"]
-                    ].forEach(initOriginalName);
+                        widgets["compress_level"]
+                    ].forEach(w => initOriginalName(w));
+                    initOriginalName(widgets["tiff_compression"], false, "TIFF Compression");
+                    initOriginalName(widgets["tga_rle"], false, "TGA RLE Compression");
 
                     const updateWidgets = () => {
                         const qualityType = formatWidget.value;
@@ -114,8 +123,8 @@ app.registerExtension({
                 const bit_depth_widget = widgets["bit_depth"];
 
                 if (bit_depth_widget) {
-                    [bit_depth_widget,widgets["join_alpha"], widgets["invert_alpha"]].forEach(initOriginalName);
-                    
+                    [bit_depth_widget, widgets["join_alpha"], widgets["invert_alpha"]].forEach(initOriginalName);
+
                     const updateWidgets = () => {
                         toggleQualityWidgets(widgets, bit_depth_widget.value, alphaExclusiveConfig);
                         this.setDirtyCanvas(true, true);

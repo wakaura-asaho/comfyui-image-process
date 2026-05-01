@@ -74,7 +74,8 @@ class ImageSaveHelperExt():
         counter: int,
         file_ext: str,
         save_to_input_folder: bool = False,
-        save_kwargs: dict = {}
+        save_kwargs: dict = {},
+        icc_profile: bytes | None = None
     ) -> ui.SavedResult:
         i = 255 * image.cpu().numpy()
         img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
@@ -96,18 +97,29 @@ class ImageSaveHelperExt():
 
         if not os.path.exists(full_output_folder):
             os.makedirs(full_output_folder)
-        img.save(os.path.join(full_output_folder, file), **save_kwargs)
+        img.save(os.path.join(full_output_folder, file), icc_profile=icc_profile, **save_kwargs)
         if (save_to_input_folder):
             if not os.path.exists(full_input_folder):
                 os.makedirs(full_input_folder)
             target_file = os.path.join(full_input_folder, file)
             if os.path.exists(target_file):
                 target_file = os.path.join(full_input_folder, f"{filename_with_batch_num}_{counter:05}_{int(time.time())}.jpg")
-            img.save(target_file, **save_kwargs)
+            img.save(target_file, icc_profile=icc_profile, **save_kwargs)
         return ui.SavedResult(file, subfolder, io.FolderType.output)
 
     @staticmethod
-    def get_save_result_temp(image: torch.Tensor) -> ui.SavedResult:
+    def get_save_result_temp(image: torch.Tensor, mask: torch.Tensor | None = None) -> ui.SavedResult:
         tmp_file = "ComfyUI_temp_" + ''.join(random.choice("abcdefghijklmnopqrstupvxyz") for _ in range(5)) + ".png"
-        Image.fromarray(np.clip(255 * image.cpu().numpy(), 0, 255).astype(np.uint8)).convert("RGBA").save(os.path.join(folder_paths.get_temp_directory(), tmp_file))
-        return ui.SavedResult(tmp_file, "", io.FolderType.temp)
+        
+        i = 255 * image.cpu().numpy()
+        img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8)).convert("RGBA")
+        
+        if mask is not None:
+            m = 255 * mask.cpu().numpy()
+            m_pil = Image.fromarray(m.astype(np.uint8), mode="L")
+            if m.shape != (img.height, img.width):
+                m_pil = m_pil.resize((img.width, img.height), Image.LANCZOS)
+            img.putalpha(m_pil)
+
+        img.save(os.path.join(folder_paths.get_temp_directory(), tmp_file))
+        return ui.SavedResult(tmp_file, "", io.FolderType.temp)

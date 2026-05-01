@@ -20,10 +20,25 @@ An image-processing node that corrects achromatic color instability commonly fou
 * **Invert Alpha:** Toggle to invert the alpha channel before processing or outputting.
 * **Dual Output:** Returns both the processed image and alpha mask separately for maximum flexibility.
 
-### 2. Save Image Advanced
+### 2. Load ICC Profile
+
+A utility node that loads an ICC color profile from the `models/icc_profiles` folder.
+
+![Example_workflow](https://github.com/wakaura-asaho/comfyui-image-process/blob/main/docs/save_image_icc.png)
+
+* **Profile Selection:** Choose from valid `.icc` or `.icm` profiles placed in your `models/icc_profiles` directory.
+* **Embedding:** Outputs the profile data to be connected to the `Save Image Advanced` node to embed color management data.
+* **Profile Information:** Outputs readable profile metadata (Model, Manufacturer, Description, Copyright).
+
+> [!WARNING]
+> `BMP` and `TGA` do not support ICC Profile embedding.
+> When saving as these formats, the profile data will be discarded.
+
+### 3. Save Image Advanced
 
 An extended node that supports outputting the images with alpha channels and metadata.
 
+* **ICC Profile:** Optional input to embed a custom ICC color profile into the saved image.
 * **Disable Metadata:** Toggles whether to embed the workflow metadata. Disabling it reduces file size but removes workflow readability.
 * **Join Alpha Channel:** Effectively the same as the official node `Join Image with Alpha`. Connect a mask to clip the image.
 * **Invert Alpha:** Toggle to invert the alpha channel before saving.
@@ -31,11 +46,12 @@ An extended node that supports outputting the images with alpha channels and met
 * **Quality:** The quality for JPEG or WebP (1-100).
 * **DPI:** Set the DPI metadata (range: 1–600, default: 300). Applies to all formats.
 * **TIFF Compression:** Choose from multiple algorithms (LZW, Deflate, CCITT, etc.) when saving as TIFF.
-* **Format:** Supports `JPG`, `PNG`, `WebP`, `TIFF`, and `BMP`.
+* **TGA RLE Compression:** Toggles whether to use RLE compression when saving as TGA.
+* **Format:** Supports `JPG`, `PNG`, `WebP`, `TIFF`, `BMP`, and `TGA`.
 * **Bit Depth:** Choose between `24bit` or `32bit` for BMP files (32bit supports alpha).
 * **Save to Input Folder:** Automatically copies the saved file to the ComfyUI input folder for immediate reuse.
 
-### 3. Dedicated Format Savers
+### 4. Dedicated Format Savers
 
 Specialized nodes for specific formats, offering both simplified and advanced controls.
 
@@ -44,9 +60,10 @@ Specialized nodes for specific formats, offering both simplified and advanced co
 * **JPG Savers:** `Save Image (JPG)` for quick saves; `Save Image Advanced (JPG)` with DPI and EXIF control.
 * **BMP Savers:** `Save Image (BMP)` for standard saves; `Save Image Advanced (BMP)` with 32-bit alpha and DPI support.
 * **TIFF Savers:** `Save Image (TIFF)` for standard saves; `Save Image Advanced (TIFF)` with comprehensive compression options and EXIF metadata.
+* **TGA Savers:** `Save Image (TGA)` for standard saves; `Save Image Advanced (TGA)` with RLE compression and alpha support.
 
 > [!WARNING]
-> If choose to save as TIFF file, ComfyUI may not be able to display the image properly.
+> If choose to save as TIFF or TGA file, ComfyUI may not be able to display the image properly.
 > The image shown in the preview pane is a copy of the PNG version of the image. The actual file saved will be in the format and the folder path you choose.
 
 > [!TIP]

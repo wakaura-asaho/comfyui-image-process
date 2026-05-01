@@ -1,6 +1,6 @@
 [project]
 name = "comfyui-image-process"
-version = "1.0.00"
+version = "1.1.00"
 description = "A ComfyUI custom node collection for image processing."
 authors = [
   {name = "Wakaura Asaho", email = "onestandaction@gmail.com"}

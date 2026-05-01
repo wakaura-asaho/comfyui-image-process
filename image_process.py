@@ -1,11 +1,11 @@
 from comfy_api.latest import io, ui
-from .image_helper import ImageSaveHelperExt
-from .define import define
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageCms
 import torch
 import folder_paths
 import os
+from .image_helper import ImageSaveHelperExt
+from .define import define
 
 class ColorArtifactNormalizer(io.ComfyNode):
     """
@@ -209,6 +209,87 @@ class ColorArtifactNormalizer(io.ComfyNode):
         
         return io.NodeOutput(output_tensor, mask_tensor)
 
+class LoadICCProfile(io.ComfyNode):
+    """
+    Loads an ICC color profile from the models/icc_profiles folder.
+    """
+    icc_folder = "icc_profiles"
+
+    def get_valid_icc_profiles(cls, color_profiles: list[str]) -> list[str]:
+        if color_profiles is None or len(color_profiles) < 0:
+            return []
+
+        valid_profiles = []
+        for cp in color_profiles:
+            if cp.lower().endswith(('.icc', '.icm')):
+                try:
+                    profile = ImageCms.getOpenProfile(folder_paths.get_full_path(cls.icc_folder, cp))
+                    if profile:
+                        valid_profiles.append(cp)
+                except (IOError, TypeError, Exception):
+                    print(f"Skipping invalid profile: {cp}")
+                    
+        return valid_profiles
+
+    @staticmethod
+    def get_icc_profile_info(profile: ImageCms.ImageCmsProfile) -> dict[str, str]:
+        if profile and isinstance(profile, ImageCms.ImageCmsProfile):
+            return {
+                "model": profile.profile.model,
+                "manufacturer": profile.profile.manufacturer,
+                "description": profile.profile.profile_description,
+                "copyright": profile.profile.copyright
+            }
+        else:
+            return {}
+
+    @staticmethod
+    def get_icc_profile_info_plain_text(profile: ImageCms.ImageCmsProfile) -> str:
+        if profile and isinstance(profile, ImageCms.ImageCmsProfile):
+            return f"""
+                Model: {profile.profile.model}\n
+                Manufacturer: {profile.profile.manufacturer}\n
+                Description: {profile.profile.profile_description}\n
+                Copyright: {profile.profile.copyright}
+            """
+        else:
+            return "no data"
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="LoadICCProfile",
+            display_name="Load ICC Profile",
+            category=define.author,
+            inputs=[
+                io.Combo.Input(
+                    id="profile",
+                    display_name="Profile",
+                    options=cls.get_valid_icc_profiles(cls, folder_paths.get_filename_list(cls.icc_folder)),
+                )
+            ],
+            outputs=[
+                io.Custom("ICC_PROFILE").Output(
+                    id="icc_profile",
+                    display_name="ICC_PROFILE"
+                ),
+                io.String.Output(
+                    id="icc_profile_info",
+                    display_name="ICC_INFO"
+                )
+            ]
+        )
+
+    @classmethod
+    def execute(cls, profile: str, **kwargs) -> io.NodeOutput:
+        path = folder_paths.get_full_path(cls.icc_folder, profile)
+        if not path:
+            raise FileNotFoundError(f"ICC profile {profile} not found.")
+        with open(path, "rb") as f:
+            icc_data = f.read()
+        icc_info = ImageCms.getOpenProfile(path)
+        return io.NodeOutput(icc_data, cls.get_icc_profile_info_plain_text(icc_info))
+
 class SaveImageAdvanced(io.ComfyNode):
     """
     Saves images to disk with additional options for metadata and compression.
@@ -218,8 +299,9 @@ class SaveImageAdvanced(io.ComfyNode):
 
     debug_header = "[ComfyUI-SaveImageAdvanced]"
 
-    web_unsupported_preview_formats = ["tiff"]
-    alpha_supported_formats = ["png", "tiff", "webp"]
+    web_unsupported_preview_formats = ["tiff", "tga"]
+    alpha_supported_formats = ["png", "tiff", "webp", "bmp", "tga"]
+    icc_unsupported_formats = ["tga", "bmp"]
 
     @classmethod
     def define_schema(cls):
@@ -238,6 +320,12 @@ class SaveImageAdvanced(io.ComfyNode):
                     id="masks",
                     display_name="Alpha Masks",
                     tooltip="Optional alpha channel masks to clip the saved images. If provided, these masks will be applied to the corresponding images before saving.",
+                    optional=True
+                ),
+                io.Custom("ICC_PROFILE").Input(
+                    id="icc_profile",
+                    display_name="ICC Profile",
+                    tooltip="Optional ICC color profile to embed into the saved images.",
                     optional=True
                 ),
                 io.Boolean.Input(
@@ -292,11 +380,17 @@ class SaveImageAdvanced(io.ComfyNode):
                     options=["none", "tiff_lzw", "tiff_deflate", "tiff_adobe_deflate", "packbits", "jpeg", "tiff_jpeg", "tiff_ccitt"],
                     default="none"
                 ),
+                io.Boolean.Input(
+                    id="tga_rle",
+                    display_name="TGA RLE Compression",
+                    tooltip="Whether to use RLE compression when saving as TGA.",
+                    default=True
+                ),
                 io.Combo.Input(
                     id="format",
                     display_name="Format",
                     tooltip="The format to save the image in.",
-                    options=["png", "jpg", "webp", "tiff", "bmp"],
+                    options=["png", "jpg", "webp", "tiff", "bmp", "tga"],
                     default="png"
                 ),
                 io.String.Input(
@@ -330,6 +424,8 @@ class SaveImageAdvanced(io.ComfyNode):
         quality: int = 90,
         save_to_input_folder: bool = False,
         dpi: int = define.printing_dpi,
+        tga_rle: bool = True,
+        icc_profile: bytes | None = None,
         **kwargs
     ) -> io.NodeOutput:
         f_output_folder, filename, c, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0])
@@ -364,8 +460,13 @@ class SaveImageAdvanced(io.ComfyNode):
                         save_options["tiffinfo"] = tiffinfo
             elif format == "bmp":
                 save_options = {"dpi": (dpi, dpi)}
+            elif format == "tga":
+                save_options = {"compression": "tga_rle" if tga_rle else None}
             else: # PNG
                 save_options = {"pnginfo": metadata, "compress_level": compress_level, "dpi": (dpi, dpi)}
+
+            if (format in cls.icc_unsupported_formats) and icc_profile is not None:
+                print(f"{cls.debug_header} ICC Profile discarded due to the incompatible format: {format.upper()}")
 
             mask = None
             if (format in cls.alpha_supported_formats) and join_alpha:
@@ -379,13 +480,15 @@ class SaveImageAdvanced(io.ComfyNode):
                 full_output_folder=f_output_folder, full_input_folder=f_input_folder, subfolder=subfolder,
                 batch_number=batch_number, counter=c,
                 file_ext=format, save_to_input_folder=save_to_input_folder,
-                save_kwargs=save_options
+                save_kwargs=save_options,
+                icc_profile=icc_profile
             )
 
             if (format in cls.web_unsupported_preview_formats):
-                tmp_results.append(ImageSaveHelperExt.get_save_result_temp(image))
+                tmp_results.append(ImageSaveHelperExt.get_save_result_temp(image, mask))
+            else:
+                results.append(result)
 
-            results.append(result)
             c += 1
 
         return io.NodeOutput(ui=(ui.SavedImages(tmp_results) if format in cls.web_unsupported_preview_formats else ui.SavedImages(results)))
@@ -785,7 +888,7 @@ class SaveImageTIFF(io.ComfyNode):
                 save_kwargs={"compression": "none", "dpi": (define.screen_dpi, define.screen_dpi)}
             )
 
-            preview_results.append(ImageSaveHelperExt.get_save_result_temp(image))
+            preview_results.append(ImageSaveHelperExt.get_save_result_temp(image, mask))
 
             c += 1
 
@@ -910,7 +1013,6 @@ class SaveImageAdvancedTIFF(io.ComfyNode):
                 if invert_alpha:
                     mask = 1.0 - mask
 
-            # Drop the return.
             ImageSaveHelperExt.get_save_result(
                 image=image, mask=mask, convert_mode=mode, join_mask=join_alpha, filename=filename,
                 full_output_folder=f_output_folder, full_input_folder=f_input_folder, subfolder=subfolder,
@@ -919,7 +1021,170 @@ class SaveImageAdvancedTIFF(io.ComfyNode):
                 save_kwargs=save_options
             )
 
+            preview_results.append(ImageSaveHelperExt.get_save_result_temp(image, mask))
+
+            c += 1
+
+        return io.NodeOutput(ui=ui.SavedImages(preview_results))
+
+
+class SaveImageTGA(io.ComfyNode):
+    """
+    Saves images to disk as TGA files.
+    """
+    output_dir = folder_paths.get_output_directory()
+    prefix_append = ""
+
+    debug_header = "[ComfyUI-SaveImageTGA]"
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="SaveImageTGA",
+            display_name="Save Image (TGA)",
+            category=define.author,
+            description="Saves images to disk as TGA files.",
+            inputs=[
+                io.Image.Input(
+                    id="images",
+                    display_name="Images",
+                    tooltip="The images to be saved."
+                ),
+                io.String.Input(
+                    id="filename_prefix",
+                    display_name="Filename Prefix",
+                    tooltip="Prefix for the saved image filenames.\nEach image will be saved as {prefix}_{index}.{format}.",
+                    default=define.default_file_name
+                ),
+            ],
+            hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
+            is_output_node=True,
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        images: torch.Tensor,
+        filename_prefix: str = define.default_file_name,
+        **kwargs
+    ) -> io.NodeOutput:
+        f_output_folder, filename, c, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0])
+        
+        preview_results = []
+        for (batch_number, image) in enumerate(images):
+            ImageSaveHelperExt.get_save_result(
+                image=image, mask=None, convert_mode="RGB", join_mask=False, filename=filename,
+                full_output_folder=f_output_folder, full_input_folder=None, subfolder=subfolder,
+                batch_number=batch_number, counter=c, file_ext="tga", save_to_input_folder=False,
+                save_kwargs={"compression": "tga_rle"}
+            )
+
             preview_results.append(ImageSaveHelperExt.get_save_result_temp(image))
+
+            c += 1
+
+        return io.NodeOutput(ui=ui.SavedImages(preview_results))
+
+class SaveImageAdvancedTGA(io.ComfyNode):
+    """
+    Saves images to disk as TGA files with additional options.
+    """
+    output_dir = folder_paths.get_output_directory()
+    prefix_append = ""
+
+    debug_header = "[ComfyUI-SaveImageAdvancedTGA]"
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="SaveImageAdvancedTGA",
+            display_name="Save Image Advanced (TGA)",
+            category=define.author,
+            description="Saves images to disk as TGA files.",
+            inputs=[
+                io.Image.Input(
+                    id="images",
+                    display_name="Images",
+                    tooltip="The images to be saved."
+                ),
+                io.Mask.Input(
+                    id="masks",
+                    display_name="Alpha Masks",
+                    tooltip="Optional alpha channel masks to clip the saved images. If provided, these masks will be applied to the corresponding images before saving.",
+                    optional=True
+                ),
+                io.Boolean.Input(
+                    id="rle",
+                    display_name="RLE Compression",
+                    tooltip="Whether to use RLE compression when saving as TGA.",
+                    default=True
+                ),
+                io.Boolean.Input(
+                    id="join_alpha",
+                    display_name="Join Alpha Channel",
+                    tooltip="Clip the image with the provided mask.",
+                    default=False
+                ),
+                io.Boolean.Input(
+                    id="invert_alpha",
+                    display_name="Invert Alpha",
+                    tooltip="Whether to invert the alpha channel before saving.",
+                    default=False
+                ),
+                io.String.Input(
+                    id="filename_prefix",
+                    display_name="Filename Prefix",
+                    tooltip="The prefix to use for the filename.",
+                    default=define.default_file_name
+                ),
+                io.Boolean.Input(
+                    id="save_to_input_folder",
+                    display_name="Save to Input Folder",
+                    tooltip="Whether to sync the image to the input folder.",
+                    default=False
+                ),
+            ],
+            hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
+            is_output_node=True,
+        )
+    
+    @classmethod
+    def execute(cls,
+        images: torch.Tensor,
+        masks: torch.Tensor | None = None,
+        filename_prefix: str = define.default_file_name,
+        rle: bool = True,
+        join_alpha: bool = False,
+        invert_alpha: bool = False,
+        save_to_input_folder: bool = False,
+        **kwargs
+    ) -> io.NodeOutput:
+        f_output_folder, filename, c, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0])
+        f_input_folder = os.path.join(folder_paths.get_input_directory(), subfolder)
+
+        preview_results = []
+        for (batch_number, image) in enumerate(images):
+            mode = "RGBA" if join_alpha else "RGB"
+            save_options = {
+                "compression": "tga_rle" if rle else None,
+            }
+                
+            mask = None
+            if join_alpha and masks is not None:
+                mask_index = min(batch_number, masks.shape[0] - 1)
+                mask = masks[mask_index]
+                if invert_alpha:
+                    mask = 1.0 - mask
+
+            ImageSaveHelperExt.get_save_result(
+                image=image, mask=mask, convert_mode=mode, join_mask=join_alpha, filename=filename,
+                full_output_folder=f_output_folder, full_input_folder=f_input_folder, subfolder=subfolder,
+                batch_number=batch_number, counter=c,
+                file_ext="tga", save_to_input_folder=save_to_input_folder,
+                save_kwargs=save_options
+            )
+
+            preview_results.append(ImageSaveHelperExt.get_save_result_temp(image, mask))
 
             c += 1
 
@@ -927,17 +1192,21 @@ class SaveImageAdvancedTIFF(io.ComfyNode):
 
 NODE_CLASS_MAPPINGS = {
     "ColorArtifactNormalizer": ColorArtifactNormalizer,
+    "LoadICCProfile": LoadICCProfile,
     "SaveImageAdvanced": SaveImageAdvanced,
     "SaveImageJPG": SaveImageJPG,
     "SaveImageAdvancedJPG": SaveImageAdvancedJPG,
     "SaveImageBMP": SaveImageBMP,
     "SaveImageAdvancedBMP": SaveImageAdvancedBMP,
     "SaveImageTIFF": SaveImageTIFF,
-    "SaveImageAdvancedTIFF": SaveImageAdvancedTIFF
+    "SaveImageAdvancedTIFF": SaveImageAdvancedTIFF,
+    "SaveImageTGA": SaveImageTGA,
+    "SaveImageAdvancedTGA": SaveImageAdvancedTGA
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "ColorArtifactNormalizer": "Color Artifact Normalizer",
+    "LoadICCProfile": "Load ICC Profile",
     "SaveImageAdvanced": "Save Image Advanced",
     "SaveImageJPG": "Save Image (JPG)",
     "SaveImageAdvancedJPG": "Save Image Advanced (JPG)",
@@ -945,4 +1214,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SaveImageAdvancedBMP": "Save Image Advanced (BMP)",
     "SaveImageTIFF": "Save Image (TIFF)",
     "SaveImageAdvancedTIFF": "Save Image Advanced (TIFF)",
+    "SaveImageTGA": "Save Image (TGA)",
+    "SaveImageAdvancedTGA": "Save Image Advanced (TGA)",
 }
