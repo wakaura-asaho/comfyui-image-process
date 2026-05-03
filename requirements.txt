@@ -1,3 +1,5 @@
 numpy>=2.3.5
 Pillow>=12.1.0
 scipy>=1.16.3
+opencv-python>=4.13.0.92
+scikit-image>=0.26.0

@@ -1,6 +1,6 @@
 # ComfyUI Image Process
 
-A collection of image-processing nodes designed to enhance and refine AI-generated images within ComfyUI workflows. (may add more nodes to this repo in the future)
+A collection of image-processing nodes designed to enhance and refine AI-generated images within ComfyUI workflows.
 
 <p align="center">
 <img src="https://github.com/wakaura-asaho/comfyui-image-process/blob/main/docs/logo.png" alt="Logo" style="display: block; margin: 0 auto; text-align: center;">
@@ -8,98 +8,110 @@ A collection of image-processing nodes designed to enhance and refine AI-generat
 
 ## Nodes Included
 
-### 1. Color Artifact Normalizer
+### 1. Achromatic Stabilizer
 
-An image-processing node that corrects achromatic color instability commonly found in AI-generated images.
+Corrects achromatic color instability commonly found in AI-generated images.
 
-* **Artifact Detection:** Automatically identifies pixels with near-zero saturation that represent color artifacts.
-* **Saturation Threshold:** Adjustable threshold parameter to fine-tune which pixels are considered artifacts (range: 0.0 - 1.0).
-* **Smart Normalization:** Snaps the hue of artifact pixels to 0 and zeroes out saturation, converting them to neutral grey.
-* **Optional Smoothing:** Apply a configurable smoothing filter to blend corrected areas seamlessly with the rest of the image.
-* **Alpha Channel Preservation:** Optionally preserve the alpha channel during processing for transparent images.
-* **Invert Alpha:** Toggle to invert the alpha channel before processing or outputting.
-* **Dual Output:** Returns both the processed image and alpha mask separately for maximum flexibility.
+* **Artifact Detection:** Identifies near-zero saturation pixels.
+* **Saturation Threshold:** Adjusts sensitivity to define artifacts (0.0 - 1.0).
+* **Smart Normalization:** Converts artifact pixels to neutral grey.
+* **Optional Smoothing:** Blends corrected areas with the image.
+* **Alpha Channel Preservation:** Maintains transparency during processing.
+* **Invert Alpha:** Inverts the alpha channel.
+* **Dual Output:** Returns both image and alpha mask separately.
 
-### 2. Load ICC Profile
+### 2. Color Patch Flatten
 
-A utility node that loads an ICC color profile from the `models/icc_profiles` folder.
+Homogenizes colors by flattening their HSV values across patches within a given tolerance.
+
+* **HSV Control:** Independently toggles flattening for Hue (H), Saturation (S), and Brightness (V).
+* **Tolerance Handling:** Flattens values only within the specified tolerance. Larger numbers mean a weaker effect.
+* **Alpha Mask Support:** Restricts the region for color calculation and flattening.
+
+### 3. Color Patch Merge
+
+Groups adjacent similar colors and replaces them with their local averages, clustering pixels into solid patches.
+
+* **Merge Solutions:**
+  * **Smooth:** Uses a bilateral filter to smooth colors while preserving edges (controlled by `Neighborhood`).
+  * **Unify:** Iteratively grows solid color regions in Lab space (controlled by `Iterations` and `Minimal Area`).
+* **Lab Color Space:** Optionally converts RGB to Lab space for perceptually accurate grouping.
+* **Detail Preservation:** "Unify" protects high-gradient edges and small regions below the `Minimal Area`.
+
+### 4. Load ICC Profile
+
+Loads an ICC color profile from `models/icc_profiles`.
 
 ![Example_workflow](https://github.com/wakaura-asaho/comfyui-image-process/blob/main/docs/save_image_icc.png)
 
-* **Profile Selection:** Choose from valid `.icc` or `.icm` profiles placed in your `models/icc_profiles` directory.
-* **Embedding:** Outputs the profile data to be connected to the `Save Image Advanced` node to embed color management data.
-* **Profile Information:** Outputs readable profile metadata (Model, Manufacturer, Description, Copyright).
+* **Profile Selection:** Choose valid `.icc` or `.icm` files.
+* **Embedding:** Outputs profile data for the `Save Image Advanced` node.
+* **Profile Information:** Outputs metadata (Model, Manufacturer, Description, Copyright).
 
 > [!WARNING]
 > `BMP` and `TGA` do not support ICC Profile embedding.
-> When saving as these formats, the profile data will be discarded.
 
-### 3. Save Image Advanced
+### 5. Save Image Advanced
 
-An extended node that supports outputting the images with alpha channels and metadata.
+Saves images with alpha channels and metadata.
 
-* **ICC Profile:** Optional input to embed a custom ICC color profile into the saved image.
-* **Disable Metadata:** Toggles whether to embed the workflow metadata. Disabling it reduces file size but removes workflow readability.
-* **Join Alpha Channel:** Effectively the same as the official node `Join Image with Alpha`. Connect a mask to clip the image.
-* **Invert Alpha:** Toggle to invert the alpha channel before saving.
-* **Compression Level:** The compression level for PNG (0-9).
-* **Quality:** The quality for JPEG or WebP (1-100).
-* **DPI:** Set the DPI metadata (range: 1–600, default: 300). Applies to all formats.
-* **TIFF Compression:** Choose from multiple algorithms (LZW, Deflate, CCITT, etc.) when saving as TIFF.
-* **TGA RLE Compression:** Toggles whether to use RLE compression when saving as TGA.
+* **ICC Profile:** Embeds a custom color profile.
+* **Disable Metadata:** Discards workflow metadata to reduce file size.
+* **Join Alpha Channel:** Clips the image with a mask, similar to `Join Image with Alpha`.
+* **Invert Alpha:** Inverts the alpha channel.
+* **Compression Level:** PNG compression (0-9).
+* **Quality:** JPEG/WebP quality (1-100).
+* **DPI:** Sets DPI metadata (1–600, default: 300).
+* **TIFF Compression:** Supports LZW, Deflate, CCITT, etc.
+* **TGA RLE Compression:** Toggles RLE compression for TGA.
 * **Format:** Supports `JPG`, `PNG`, `WebP`, `TIFF`, `BMP`, and `TGA`.
-* **Bit Depth:** Choose between `24bit` or `32bit` for BMP files (32bit supports alpha).
-* **Save to Input Folder:** Automatically copies the saved file to the ComfyUI input folder for immediate reuse.
+* **Bit Depth:** `24bit` or `32bit` for BMP (32-bit supports alpha).
+* **Save to Input Folder:** Copies the saved file to the input folder for reuse.
 
-### 4. Dedicated Format Savers
+### 6. Dedicated Format Savers
 
-Specialized nodes for specific formats, offering both simplified and advanced controls.
+Format-specific savers with simple and advanced variants.
 
 ![Example_workflow](https://github.com/wakaura-asaho/comfyui-image-process/blob/main/docs/save_image_simple.png)
 
-* **JPG Savers:** `Save Image (JPG)` for quick saves; `Save Image Advanced (JPG)` with DPI and EXIF control.
-* **BMP Savers:** `Save Image (BMP)` for standard saves; `Save Image Advanced (BMP)` with 32-bit alpha and DPI support.
-* **TIFF Savers:** `Save Image (TIFF)` for standard saves; `Save Image Advanced (TIFF)` with comprehensive compression options and EXIF metadata.
-* **TGA Savers:** `Save Image (TGA)` for standard saves; `Save Image Advanced (TGA)` with RLE compression and alpha support.
+* **JPG:** Quick saves or advanced EXIF/DPI control.
+* **BMP:** Standard saves or 32-bit alpha/DPI support.
+* **TIFF:** Standard saves or advanced compression/EXIF options.
+* **TGA:** Standard saves or RLE compression/alpha support.
 
 > [!WARNING]
-> If choose to save as TIFF or TGA file, ComfyUI may not be able to display the image properly.
-> The image shown in the preview pane is a copy of the PNG version of the image. The actual file saved will be in the format and the folder path you choose.
+> ComfyUI may not display TIFF or TGA files properly in the preview pane. The preview is a PNG copy, but the actual file is saved in your chosen format.
 
 > [!TIP]
-> `tiff_ccitt` is only useful for scanned documents, fax images, or text/line-art that is already black and white.
-> For photographic content, you might want to use `tiff_lzw`, `tiff_deflate`, or `tiff_adobe_deflate` instead.
+> `tiff_ccitt` is for black-and-white documents or line-art. For photography, use `tiff_lzw`, `tiff_deflate`, or `tiff_adobe_deflate`.
 
 ---
 
 ## Example Usage
 
-The `Color Artifact Normalizer` is particularly useful for:
+The `Achromatic Stabilizer` is particularly useful for:
 
-* **Removing color noise** from AI-generated images that exhibit hue instability in near-white or near-black regions.
-* **Improving consistency** in images generated with models prone to producing desaturated pixels with unstable hues.
-* **Preserving transparency** in images that require alpha channel information while correcting color artifacts.
+* **Removing color noise** from near-white or near-black regions.
+* **Improving consistency** for models prone to desaturated, hue-unstable pixels.
+* **Preserving transparency** while correcting color artifacts.
 
 ![Example_workflow](https://github.com/wakaura-asaho/comfyui-image-process/blob/main/docs/example.png)
 
-To use the node in your workflow:
+To use the node:
 
-1. Connect an image to the **Image** input.
-2. (Optional) Connect an alpha mask to the **Alpha Mask** input if you want to provide a custom alpha channel.
-3. Adjust the **Saturation Threshold** to control sensitivity (lower values = more pixels corrected).
-4. Enable **Smooth Transitions** to reduce visible artifacts in corrected regions.
-5. Set the **Smoothing Kernel Size** for the intensity of the smoothing effect (higher values = more blending).
-6. Toggle **Preserve Alpha** to keep or discard the alpha channel in the output.
+1. Connect to **Image**.
+2. (Optional) Connect an **Alpha Mask**.
+3. Adjust **Saturation Threshold** (lower = more aggressive).
+4. Enable **Smooth Transitions** to blend corrected areas.
+5. Set **Smoothing Kernel Size** for blending intensity.
+6. Toggle **Preserve Alpha** as needed.
 
-The node will output the corrected image and its alpha channel separately.
-
-The `Save Image Advanced` can be used at the end of the workflow to save your images with additional preprocessing tweaks:
+The `Save Image Advanced` node can finalize your workflow with extra tweaks:
 
 ![Example_workflow](https://github.com/wakaura-asaho/comfyui-image-process/blob/main/docs/save_image_adv.png)
 
-The workflow screenshot above uses a custom node to remove the background from the generated image, sending the mask to the node to save the image with an alpha channel.
-
-When the `Disable Metadata` is set to True, you will get a smaller file due to discarded metadata, and ComfyUI will no longer be able to read the workflow from the image. 
+The example above removes the background and sends the mask to save with an alpha channel.
+Enable `Disable Metadata` to reduce file size at the cost of workflow readability.
 
 ---
 
@@ -109,12 +121,12 @@ When the `Disable Metadata` is set to True, you will get a smaller file due to d
 
 1. Install [ComfyUI-Manager](https://github.com/ltdrdata/ComfyUI-Manager).
 2. Click on **"Install via Git URL"**.
-3. Paste the URL of this repository: `https://github.com/wakaura-asaho/comfyui-image-process`
+3. Paste the URL: `https://github.com/wakaura-asaho/comfyui-image-process`
 4. Restart ComfyUI.
 
 ### Method 2: Manual Installation
 
-1. Open a terminal in your `ComfyUI/custom_nodes` folder.
+1. Open a terminal in `ComfyUI/custom_nodes`.
 2. Clone this repository:
 ```bash
 git clone https://github.com/wakaura-asaho/comfyui-image-process.git
@@ -126,7 +138,7 @@ pip install -r comfyui-image-process/requirements.txt
 4. Restart ComfyUI.
 
 > [!WARNING]
-> **Package Dependency Notice:** Consider using `pip install -r requirements.txt --upgrade-strategy only-if-needed` to install only missing or outdated packages to review your currently installed packages and avoid unnecessary version conflicts or environment breakage.
+> **Dependency Notice:** Use `pip install -r requirements.txt --upgrade-strategy only-if-needed` to avoid unnecessary version conflicts.
 
 ---
 
@@ -137,17 +149,17 @@ pip install -r comfyui-image-process/requirements.txt
 ## Usage Tips
 
 > [!TIP]
-> **Saturation Threshold:** Start with the default value of 0.08 and adjust based on your image. Lower values (e.g., 0.05) will be more aggressive, while higher values (e.g., 0.15) will be more conservative.
+> **Saturation Threshold:** Start at 0.08. Use lower values (e.g., 0.05) for more aggressive correction, or higher values (e.g., 0.15) to be conservative.
 
 > [!TIP]
-> **Smoothing Kernel Size:** For subtle corrections, use smaller kernel sizes (3-5). For more pronounced smoothing, try larger sizes (7-15), but be aware this may blur the affected regions.
+> **Smoothing Kernel Size:** Use 3-5 for subtle corrections. Try 7-15 for pronounced smoothing, though it may blur regions.
 
 > [!TIP]
-> **Alpha Preservation:** If you're working with transparent images, enable **Preserve Alpha** and optionally provide an alpha mask to ensure your transparency information is maintained through processing.
+> **Alpha Preservation:** Enable **Preserve Alpha** with an optional mask to maintain transparency.
 
 ## Compatible Versions and Notices
 
-The nodes are designed for use with modern versions of ComfyUI and are written as V3 nodes.
+Designed for modern ComfyUI versions (V3 nodes).
 
 * Tested Environment: Frontend >= v1.37.11, base >= 0.12.3
-* Dependencies: NumPy >= 2.3.5, Pillow >= 12.1.0, SciPy >= 1.16.3
+* Dependencies: NumPy >= 2.3.5, Pillow >= 12.1.0, SciPy >= 1.16.3, scikit-image >= 0.26.0

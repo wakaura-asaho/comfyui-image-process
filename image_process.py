@@ -1,13 +1,412 @@
 from comfy_api.latest import io, ui
 import numpy as np
+import scipy.ndimage as nd
 from PIL import Image, ImageCms
+from skimage.color import rgb2lab, rgb2hsv, hsv2rgb
 import torch
 import folder_paths
 import os
 from .image_helper import ImageSaveHelperExt
 from .define import define
 
-class ColorArtifactNormalizer(io.ComfyNode):
+class ColorPatchFlatten(io.ComfyNode):
+    """
+    Flatten HSV values across a color patch within a given tolerance.
+    """
+
+    debug_header = "[ComfyUI-ColorPatchFlatten]"
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="ColorPatchFlatten",
+            display_name="Color Patch Flatten",
+            category=define.author,
+            is_experimental=True,
+            description="Flatten HSV values across a color patch within a given tolerance.",
+            inputs=[
+                io.Image.Input(
+                    id="image",
+                    display_name="Image",
+                    tooltip="The image to be processed."
+                ),
+                io.Mask.Input(
+                    id="mask",
+                    display_name="Alpha Mask",
+                    tooltip="Optional alpha channel mask.",
+                    optional=True
+                ),
+                io.Float.Input(
+                    id="flatten_tolerance",
+                    display_name="Flatten Tolerance",
+                    tooltip="How different colors can be conisdered as a same color patch.\nLarger number means weaker flattening effect.",
+                    step=0.01,
+                    round=0.01,
+                    default=0.05,
+                    max=1.0,
+                    min=0.00
+                ),
+                io.Boolean.Input(
+                    id="flatten_hue",
+                    display_name="H",
+                    default=True
+                ),
+                io.Boolean.Input(
+                    id="flatten_saturation",
+                    display_name="S",
+                    default=True
+                ),
+                io.Boolean.Input(
+                    id="flatten_brightness",
+                    display_name="V",
+                    default=True
+                )
+            ],
+            outputs=[
+                io.Image.Output(
+                    id="output",
+                    display_name="OUTPUT"
+                ),
+                io.Mask.Output(
+                    id="mask",
+                    display_name="ALPHA"
+                )
+            ]
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        image: torch.Tensor,
+        mask: torch.Tensor | None = None,
+        flatten_tolerance: float = 0.05,
+        flatten_hue: bool = True,
+        flatten_saturation: bool = True,
+        flatten_brightness: bool = True,
+        **kwargs
+    ) -> io.NodeOutput:
+        pil_images = ImageSaveHelperExt.to_pillow_images(image)
+        
+        alpha_raw_batch = None
+        if mask is not None:
+            alpha_raw_batch = mask.cpu().numpy()
+
+        output_images = []
+        output_masks = []
+        for i, pil_image in enumerate(pil_images):
+            pil_image = pil_image.convert("RGB")
+            
+            alpha_f32 = None
+            if alpha_raw_batch is not None:
+                if alpha_raw_batch.ndim == 3:
+                    alpha_idx = min(i, alpha_raw_batch.shape[0] - 1)
+                    current_alpha_raw = alpha_raw_batch[alpha_idx]
+                else:
+                    current_alpha_raw = alpha_raw_batch
+                
+                if current_alpha_raw.max() > 1.0:
+                    alpha_f32 = np.clip(current_alpha_raw / 255, 0, 1).astype(np.float32)
+                else:
+                    alpha_f32 = current_alpha_raw.astype(np.float32)
+
+            rgb_np = np.array(pil_image, dtype=np.float32) / 255.0 # (H, W, 3)
+            
+            if flatten_tolerance > 0 and (flatten_hue or flatten_saturation or flatten_brightness):
+                hsv_np = rgb2hsv(rgb_np)
+                
+                # Determine patch for mean calculation
+                if alpha_f32 is not None:
+                    if alpha_f32.shape[:2] != rgb_np.shape[:2]:
+                        mask_pil = Image.fromarray((alpha_f32 * 255).clip(0, 255).astype(np.uint8), mode="L")
+                        mask_pil = mask_pil.resize((rgb_np.shape[1], rgb_np.shape[0]), Image.LANCZOS)
+                        alpha_f32 = np.array(mask_pil, dtype=np.float32) / 255.0
+                    
+                    mask_indices = alpha_f32 > 0.05
+                    if np.any(mask_indices):
+                        mean_hsv = np.mean(hsv_np[mask_indices], axis=0)
+                    else:
+                        mean_hsv = np.mean(hsv_np.reshape(-1, 3), axis=0)
+                else:
+                    mean_hsv = np.mean(hsv_np.reshape(-1, 3), axis=0)
+                
+                # Flatten
+                if flatten_hue:
+                    h_diff = np.abs(hsv_np[..., 0] - mean_hsv[0])
+                    # Circular hue diff
+                    h_diff = np.minimum(h_diff, 1.0 - h_diff)
+                    hsv_np[..., 0] = np.where(h_diff <= flatten_tolerance, mean_hsv[0], hsv_np[..., 0])
+                
+                if flatten_saturation:
+                    s_diff = np.abs(hsv_np[..., 1] - mean_hsv[1])
+                    hsv_np[..., 1] = np.where(s_diff <= flatten_tolerance, mean_hsv[1], hsv_np[..., 1])
+                    
+                if flatten_brightness:
+                    v_diff = np.abs(hsv_np[..., 2] - mean_hsv[2])
+                    hsv_np[..., 2] = np.where(v_diff <= flatten_tolerance, mean_hsv[2], hsv_np[..., 2])
+                
+                rgb_np = hsv2rgb(hsv_np)
+            
+            rgb_u8 = np.clip(rgb_np * 255, 0, 255).astype(np.uint8)
+
+            if alpha_f32 is not None:
+                alpha_u8 = np.clip(alpha_f32 * 255, 0, 255).astype(np.uint8)
+                rgba_array = np.concatenate([rgb_u8, alpha_u8[..., np.newaxis]], axis=-1)
+                output_image_pil = Image.fromarray(rgba_array, mode="RGBA")
+                output_mask_tensor = torch.from_numpy(alpha_f32)
+            else:
+                output_image_pil = Image.fromarray(rgb_u8)
+                output_mask_tensor = torch.zeros((rgb_u8.shape[0], rgb_u8.shape[1]), dtype=torch.float32)
+
+            output_tensor = torch.from_numpy(np.array(output_image_pil, dtype=np.float32) / 255.0)
+            output_images.append(output_tensor)
+            output_masks.append(output_mask_tensor)
+
+        output_images_batch = torch.stack(output_images, dim=0)
+        output_masks_batch = torch.stack(output_masks, dim=0)
+        
+        return io.NodeOutput(output_images_batch, output_masks_batch)
+
+class ColorPatchMerge(io.ComfyNode):
+    """
+    Groups similar colors and replaces them with their local average.
+    """
+    
+    debug_header = "[ComfyUI-ColorPatchMerge]"
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="ColorPatchMerge",
+            display_name="Color Patch Merge",
+            category=define.author,
+            is_experimental=True,
+            description="Groups similar colors and replaces them with their local averages.",
+            inputs=[
+                io.Image.Input(
+                    id="image",
+                    display_name="Image",
+                    tooltip="The image to be processed."
+                ),
+                io.Mask.Input(
+                    id="mask",
+                    display_name="Alpha Mask",
+                    tooltip="Optional alpha channel mask.",
+                    optional=True
+                ),
+                io.Float.Input(
+                    id="merge_tolerance",
+                    display_name="Merge Tolerance",
+                    tooltip="How different colors can be to stay in the same group.",
+                    step=0.01,
+                    round=0.01,
+                    default=0.05,
+                    max=1.0,
+                    min=0.00
+                ),
+                io.Int.Input(
+                    id="neighborhood",
+                    display_name="Neighborhood",
+                    tooltip="The neighborhood size (diameter) for the bilateral filter.\nUsed for 'Smooth' merging solution.",
+                    step=1,
+                    default=3,
+                    max=31,
+                    min=3
+                ),
+                io.Int.Input(
+                    id="min_area",
+                    display_name="Minimal Area",
+                    tooltip="The minimum area size for color patches.\nUsed for 'Unify' merging solution.",
+                    step=1,
+                    default=20,
+                    max=1024,
+                    min=2
+                ),
+                io.Int.Input(
+                    id="iterations",
+                    display_name="Iterations",
+                    tooltip="Number of growth iterations for color patches.\nMore iterations result in larger, more uniform color regions.\nUsed for 'Unify' merging solution.",
+                    step=1,
+                    default=2,
+                    max=16,
+                    min=1
+                ),
+                io.Boolean.Input(
+                    id="use_lab",
+                    display_name="Use Lab Colors",
+                    tooltip="Convert RGB space to Lab colors.",
+                    default=True
+                ),
+                io.Combo.Input(
+                    id="merge_solution",
+                    display_name="Merge Solution",
+                    tooltip="How to handle the color merging.",
+                    options=["Smooth", "Unify"],
+                    default="Smooth"
+                )
+            ],
+            outputs=[
+                io.Image.Output(
+                    id="output",
+                    display_name="OUTPUT"
+                ),
+                io.Mask.Output(
+                    id="mask",
+                    display_name="ALPHA"
+                )
+            ]
+        )
+
+    @classmethod
+    def unify_colors(
+            cls, rgb_np: np.ndarray, 
+            tolerance: float = 8.0, 
+            min_area: int = 20,
+            iterations: int = 2,
+            use_lab: bool = True
+        ) -> np.ndarray:
+        orig = rgb_np.astype(np.float32)
+    
+        if use_lab:
+            data_for_quant = rgb2lab(orig)
+        else:
+            data_for_quant = orig * 255.0
+        
+        # Coarser quantization
+        q = (data_for_quant / tolerance).astype(np.int32)
+        
+        if use_lab:
+            flat_colors = q[..., 0] + q[..., 1] * 1000 + q[..., 2] * 1000000
+        else:
+            flat_colors = q[..., 0] + q[..., 1] * 300 + q[..., 2] * 90000
+        
+        # Cap the growth footprint size to avoid performance issues 
+        footprint_size = min(min_area, 32)
+        structure = np.ones((footprint_size, footprint_size), dtype=np.int32)
+        connected = flat_colors.copy()
+        
+        for _ in range(iterations):
+            dilated = nd.grey_dilation(connected, footprint=structure)
+            connected = np.where(dilated == flat_colors, flat_colors, dilated)  # Grow regions
+        
+        labels, num_features = nd.label(connected, structure=np.ones((3, 3), dtype=np.int32))
+        
+        index = np.arange(1, num_features + 1)
+        mean_r = nd.mean(orig[..., 0], labels, index)
+        mean_g = nd.mean(orig[..., 1], labels, index)
+        mean_b = nd.mean(orig[..., 2], labels, index)
+        means = np.column_stack((mean_r, mean_g, mean_b))
+        
+        lookup_table = np.vstack(([0, 0, 0], means))
+        flattened = lookup_table[labels]
+        
+        # protect small areas or high-gradient (edge) pixels
+        if min_area > 1:
+            counts = nd.sum(np.ones_like(labels), labels, index)
+            
+            lookup_counts = np.zeros(num_features + 1, dtype=counts.dtype)
+            lookup_counts[1:] = counts
+
+            large_mask = lookup_counts[labels] >= min_area
+            large_mask = large_mask[..., None]
+            
+            # high local variance areas keep original
+            gray = np.dot(orig[..., :3], [0.299, 0.587, 0.114])
+            local_var = nd.generic_filter(gray, np.var, size=3)
+            edge_mask = local_var > np.percentile(local_var, 85)  # Top ~15% variance = edges
+            
+            result = np.where(large_mask & ~edge_mask[..., None], flattened, orig)
+        else:
+            result = flattened
+        
+        return result
+
+    @classmethod
+    def smooth_colors(cls, rgb_np: np.ndarray, tolerance: float = 0.05, neighborhood: int = 3):
+        import cv2
+        simplified = cv2.bilateralFilter(
+            (rgb_np * 255).astype(np.uint8), 
+            d=neighborhood, 
+            sigmaColor=tolerance * 255, 
+            sigmaSpace=neighborhood * 2
+        )
+        return simplified.astype(np.float32) / 255.0
+    
+    @classmethod
+    def execute(
+        cls,
+        image: torch.Tensor,
+        mask: torch.Tensor | None = None,
+        merge_tolerance: float = 0.01,
+        neighborhood: int = 3,
+        min_area: int = 3,
+        iterations: int = 2,
+        use_lab: bool = True,
+        merge_solution: str = "Smooth",
+        **kwargs
+    ) -> io.NodeOutput:
+        pil_images = ImageSaveHelperExt.to_pillow_images(image)
+        
+        alpha_raw_batch = None
+        if mask is not None:
+            alpha_raw_batch = mask.cpu().numpy()
+
+        output_images = []
+        output_masks = []
+        for i, pil_image in enumerate(pil_images):
+            pil_image = pil_image.convert("RGB")
+            
+            alpha_f32 = None
+            if alpha_raw_batch is not None:
+                if alpha_raw_batch.ndim == 3:
+                    alpha_idx = min(i, alpha_raw_batch.shape[0] - 1)
+                    current_alpha_raw = alpha_raw_batch[alpha_idx]
+                else:
+                    current_alpha_raw = alpha_raw_batch
+                if current_alpha_raw.max() > 1.0:
+                    alpha_f32 = np.clip(current_alpha_raw / 255, 0, 1).astype(np.float32)
+                else:
+                    alpha_f32 = current_alpha_raw.astype(np.float32)
+
+            rgb_np = np.array(pil_image, dtype=np.float32) / 255.0 # (H, W, 3)
+
+            if merge_tolerance > 0 :
+                if merge_solution == "Smooth" and neighborhood > 0:
+                    rgb_np = cls.smooth_colors(rgb_np, merge_tolerance, neighborhood)
+                elif merge_solution == "Unify" and min_area > 0:
+                    # Scale tolerance appropriately for the unify_colors method
+                    # (default merge_tolerance is 0.05, so * 255 gives ~12.75, which 
+                    # is reasonable for LAB 0-100 or RGB 0-255 ranges).
+                    rgb_np = cls.unify_colors(rgb_np, merge_tolerance * 255, min_area, iterations, use_lab)
+            else:
+                print(f"{cls.debug_header} Tolerance is set to zero. The process will be skipped.")
+            
+            rgb_u8 = np.clip(rgb_np * 255, 0, 255).astype(np.uint8)
+
+            if alpha_f32 is not None:
+                # Resize alpha to match image if needed
+                if alpha_f32.shape[:2] != rgb_u8.shape[:2]:
+                    mask_pil = Image.fromarray((alpha_f32 * 255).clip(0, 255).astype(np.uint8), mode="L")
+                    mask_pil = mask_pil.resize((rgb_u8.shape[1], rgb_u8.shape[0]), Image.LANCZOS)
+                    alpha_f32 = np.array(mask_pil, dtype=np.float32) / 255.0
+                
+                alpha_u8 = np.clip(alpha_f32 * 255, 0, 255).astype(np.uint8)
+                rgba_array = np.concatenate([rgb_u8, alpha_u8[..., np.newaxis]], axis=-1)
+                output_image_pil = Image.fromarray(rgba_array, mode="RGBA")
+                output_mask_tensor = torch.from_numpy(alpha_f32)
+            else:
+                output_image_pil = Image.fromarray(rgb_u8)
+                output_mask_tensor = torch.zeros((rgb_u8.shape[0], rgb_u8.shape[1]), dtype=torch.float32)
+
+            output_tensor = torch.from_numpy(np.array(output_image_pil, dtype=np.float32) / 255.0)
+            output_images.append(output_tensor)
+            output_masks.append(output_mask_tensor)
+
+        output_images_batch = torch.stack(output_images, dim=0)
+        output_masks_batch = torch.stack(output_masks, dim=0)
+        
+        return io.NodeOutput(output_images_batch, output_masks_batch)
+
+class AchromaticStabilizer(io.ComfyNode):
     """
     Fix achromatic color instability from AI-generated images.
 
@@ -15,27 +414,27 @@ class ColorArtifactNormalizer(io.ComfyNode):
     and their saturation zeroed out, then optionally smoothed.
     """
 
-    debug_header = "[ComfyUI-ColorArtifactNormalizer]"
+    debug_header = "[ComfyUI-AchromaticStabilizer]"
 
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id="ColorArtifactNormalizer",
-            display_name="Color Artifact Normalizer",
+            node_id="AchromaticStabilizer",
+            display_name="Achromatic Stabilizer",
             category=define.author,
             is_experimental=True,
-            description="Fix achromatic color instability from AI-generated images. "
+            description="Fix achromatic color instability across the image."
                         "Pixels with near-zero saturation have their hue snapped to 0 and their saturation zeroed out, then optionally smoothed.",
             inputs=[
                 io.Image.Input(
                     id="image",
                     display_name="Image",
-                    tooltip="The image to be processed for color artifact normalization."
+                    tooltip="The image to be processed."
                 ),
                 io.Mask.Input(
                     id="mask",
                     display_name="Alpha Mask",
-                    tooltip="Optional alpha channel mask. If provided and preserve_alpha is True, this mask will be used as the alpha channel.",
+                    tooltip="Optional alpha channel mask.\nIf provided and preserve_alpha is True, this mask will be used as the alpha channel.",
                     optional=True
                 ),
                 io.Boolean.Input(
@@ -130,84 +529,112 @@ class ColorArtifactNormalizer(io.ComfyNode):
         invert_alpha: bool = False,
         **kwargs
     ) -> io.NodeOutput:
-        # Convert torch.Tensor to numpy array
-        image = image.cpu().numpy()
-        if image.ndim == 4:
-            image = image[0]
-        # Convert float images to uint8
-        if image.dtype == np.float32 or image.dtype == np.float64:
-            image = np.clip(image * 255, 0, 255).astype(np.uint8)
-        if image.shape[2] == 4:
-            image = Image.fromarray(image, mode="RGBA")
-        elif image.shape[2] == 3:
-            image = Image.fromarray(image, mode="RGB")
-        else:
-            image = Image.fromarray(image.squeeze(), mode="L")
+        if kernel_size % 2 == 0:
+            kernel_size += 1
+            print(
+                f"{cls.debug_header} kernel_size rounded up to {kernel_size} "
+                f"(must be odd for a symmetric smoothing kernel)."
+            )
+
+        pil_images = ImageSaveHelperExt.to_pillow_images(image)
         
-        img = image
-        if preserve_alpha and img.mode == "P":
-            img = img.convert("RGBA")
-
-        alpha = None
-        # Use provided mask if preserve_alpha is True and mask is provided
+        alpha_raw_batch = None
         if preserve_alpha and mask is not None:
-            # Convert mask input to numpy array
-            alpha = mask.cpu().numpy()
-            if alpha.ndim == 3:
-                alpha = alpha[0]
-            # Normalize to [0, 1] if needed
-            if alpha.max() > 1.0:
-                alpha = np.clip(alpha / 255.0, 0, 1).astype(np.float32)
-            img = img.convert("RGB")
-        elif preserve_alpha and img.mode in ("RGBA", "LA"):
-            alpha = np.array(img.split()[-1], dtype=np.float32) / 255.0
-            img = img.convert("RGB")
-        else:
-            img = img.convert("RGB")
+            alpha_raw_batch = mask.cpu().numpy()
 
-        rgb = np.array(img, dtype=np.float32) / 255.0
-        c_max = rgb.max(axis=-1)
-        c_min = rgb.min(axis=-1)
-        delta = c_max - c_min
-        sat = np.where(c_max > 0, delta / c_max, 0.0)
+        output_images = []
+        output_masks = []
+        alpha_preserved = False
 
-        neutral_mask = sat < sat_threshold
-        grey_value = rgb.mean(axis=-1, keepdims=True)
-        rgb[neutral_mask] = np.repeat(grey_value, 3, axis=-1)[neutral_mask]
+        for i, pil_image in enumerate(pil_images):
+            if preserve_alpha and pil_image.mode == "P":
+                pil_image = pil_image.convert("RGBA")
 
-        if smooth:
-            try:
-                from scipy.ndimage import uniform_filter
-                smoothed = uniform_filter(rgb, size=[kernel_size, kernel_size, 1])
-                mask3 = np.stack([neutral_mask] * 3, axis=-1)
-                rgb = np.where(mask3, smoothed, rgb)
-            except Exception as exc:
-                print(f"{cls.debug_header} Warning: smoothing failed ({exc}). Output will use unsmoothed correction.")
+            alpha_f32: np.ndarray | None = None
+            if alpha_raw_batch is not None:
+                # (B, H, W)
+                if alpha_raw_batch.ndim == 3:
+                    alpha_idx = min(i, alpha_raw_batch.shape[0] - 1)
+                    current_alpha_raw = alpha_raw_batch[alpha_idx]
+                else:
+                    current_alpha_raw = alpha_raw_batch
+                if current_alpha_raw.max() > 1.0:
+                    alpha_f32 = np.clip(current_alpha_raw / 255, 0, 1).astype(np.float32)
+                else:
+                    alpha_f32 = current_alpha_raw.astype(np.float32)
+                pil_image = pil_image.convert("RGB")
+            elif preserve_alpha and pil_image.mode in ("RGBA", "LA"):
+                alpha_f32 = np.array(pil_image.split()[-1], dtype=np.float32) / 255.0
+                pil_image = pil_image.convert("RGB")
+            else:
+                pil_image = pil_image.convert("RGB")
 
-        rgb = np.clip(rgb * 255, 0, 255).astype(np.uint8)
-        if preserve_alpha and alpha is not None:
-            if alpha.shape[:2] != rgb.shape[:2]:
-                mask_image = Image.fromarray(alpha.astype(np.uint8), mode="L")
-                mask_image = mask_image.resize(rgb.shape[:2][::-1], Image.LANCZOS)
-                alpha = np.array(mask_image)
-            if alpha.dtype != np.uint8:
-                if alpha.max() <= 1.0:
-                    alpha = alpha * 255
-                alpha = np.clip(alpha, 0, 255).astype(np.uint8)
-            if invert_alpha:
-                alpha = 255 - alpha
-            result_array = np.concatenate([rgb, alpha[..., np.newaxis]], axis=-1)
-            output_image = Image.fromarray(result_array, mode="RGBA")
-            mask_tensor = torch.from_numpy(alpha.astype(np.float32) / 255.0).unsqueeze(0)
+            rgb = np.array(pil_image, dtype=np.float32) / 255 # (H, W, 3)
+
+            c_max = rgb.max(axis=-1)
+            c_min = rgb.min(axis=-1)
+            chroma = c_max - c_min # absolute chroma
+     
+            neutral_mask = chroma < sat_threshold
+
+            rgb_original = rgb.copy()
+     
+            # Replace artifact pixels with their luminance grey.
+            grey_value = rgb.mean(axis=-1, keepdims=True) # (H, W, 1)
+            rgb[neutral_mask] = np.repeat(grey_value, 3, axis=-1)[neutral_mask]
+
+            if smooth:
+                try:
+                    smoothed_original = nd.uniform_filter(rgb_original, size=[kernel_size, kernel_size, 1])
+                    mask3 = np.stack([neutral_mask] * 3, axis=-1)
+                    rgb = np.where(mask3, smoothed_original, rgb)
+                except Exception as exc:
+                    print(
+                        f"{cls.debug_header} Warning: smoothing failed ({exc}). "
+                        f"Output will use unsmoothed correction."
+                    )
+     
+            rgb_u8 = np.clip(rgb * 255, 0, 255).astype(np.uint8) # (H, W, 3)
+            if preserve_alpha and alpha_f32 is not None:
+                alpha_preserved = True
+                # Resize alpha to match image if needed.
+                if alpha_f32.shape[:2] != rgb_u8.shape[:2]:
+                    mask_pil = Image.fromarray(
+                        (alpha_f32 * 255).clip(0, 255).astype(np.uint8), mode="L"
+                    )
+                    target_wh = (rgb_u8.shape[1], rgb_u8.shape[0])
+                    mask_pil = mask_pil.resize(target_wh, Image.LANCZOS)
+                    alpha_f32 = np.array(mask_pil, dtype=np.float32) / 255.0
+     
+                if invert_alpha:
+                    alpha_f32 = 1.0 - alpha_f32
+     
+                alpha_u8 = np.clip(alpha_f32 * 255, 0, 255).astype(np.uint8)
+     
+                rgba_array = np.concatenate([rgb_u8, alpha_u8[..., np.newaxis]], axis=-1)
+                output_image_pil = Image.fromarray(rgba_array, mode="RGBA")
+
+                output_mask_tensor = torch.from_numpy(alpha_f32)
+            else:
+                output_image_pil = Image.fromarray(rgb_u8)
+                output_mask_tensor = torch.zeros(
+                    (rgb_u8.shape[0], rgb_u8.shape[1]), dtype=torch.float32
+                )
+
+            output_tensor = torch.from_numpy(np.array(output_image_pil, dtype=np.float32) / 255.0)
+            
+            output_images.append(output_tensor)
+            output_masks.append(output_mask_tensor)
+
+        if alpha_preserved:
             print(f"{cls.debug_header} Alpha channel preserved in output image.")
         else:
-            output_image = Image.fromarray(rgb)
-            mask_tensor = torch.zeros((1, rgb.shape[0], rgb.shape[1]), dtype=torch.float32)
             print(f"{cls.debug_header} No alpha channel preserved; output image is opaque.")
 
-        output_tensor = torch.from_numpy(np.array(output_image, dtype=np.float32) / 255.0).unsqueeze(0)
+        output_images_batch = torch.stack(output_images, dim=0)
+        output_masks_batch = torch.stack(output_masks, dim=0)
         
-        return io.NodeOutput(output_tensor, mask_tensor)
+        return io.NodeOutput(output_images_batch, output_masks_batch)
 
 class LoadICCProfile(io.ComfyNode):
     """
@@ -215,6 +642,7 @@ class LoadICCProfile(io.ComfyNode):
     """
     icc_folder = "icc_profiles"
 
+    @classmethod
     def get_valid_icc_profiles(cls, color_profiles: list[str]) -> list[str]:
         if color_profiles is None or len(color_profiles) < 0:
             return []
@@ -265,7 +693,7 @@ class LoadICCProfile(io.ComfyNode):
                 io.Combo.Input(
                     id="profile",
                     display_name="Profile",
-                    options=cls.get_valid_icc_profiles(cls, folder_paths.get_filename_list(cls.icc_folder)),
+                    options=cls.get_valid_icc_profiles(folder_paths.get_filename_list(cls.icc_folder)),
                 )
             ],
             outputs=[
@@ -1191,7 +1619,9 @@ class SaveImageAdvancedTGA(io.ComfyNode):
         return io.NodeOutput(ui=ui.SavedImages(preview_results))
 
 NODE_CLASS_MAPPINGS = {
-    "ColorArtifactNormalizer": ColorArtifactNormalizer,
+    "ColorPatchFlatten": ColorPatchFlatten,
+    "ColorPatchMerge": ColorPatchMerge,
+    "AchromaticStabilizer": AchromaticStabilizer,
     "LoadICCProfile": LoadICCProfile,
     "SaveImageAdvanced": SaveImageAdvanced,
     "SaveImageJPG": SaveImageJPG,
@@ -1205,7 +1635,9 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "ColorArtifactNormalizer": "Color Artifact Normalizer",
+    "ColorPatchFlatten": "Color Patch Flatten",
+    "ColorPatchMerge": "Color Patch Merge",
+    "AchromaticStabilizer": "Achromatic Stabilizer",
     "LoadICCProfile": "Load ICC Profile",
     "SaveImageAdvanced": "Save Image Advanced",
     "SaveImageJPG": "Save Image (JPG)",

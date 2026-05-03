@@ -15,47 +15,87 @@ const alphaExclusiveConfig = {
     "invert_alpha": ["32bit"]
 };
 
-function applyWidgetStyle(widget, disabled) {
-    const dark_grey = "#444";
-    const light_grey = "#666";
+const colorPatchMergeConfig = {
+    "neighborhood": ["Smooth"],
+    "min_area": ["Unify"],
+    "iterations": ["Unify"],
+    "use_lab": ["Unify"]
+};
 
-    const color = disabled ? dark_grey : undefined;
-    const textColor = disabled ? light_grey : undefined;
-
-    widget.disabled = disabled;
-    if (widget.options) {
-        widget.options.color = color;
-        widget.options.text_color = textColor;
+class WidgetManager {
+    constructor(node, config) {
+        this.node = node;
+        this.config = config;
+        this.widgets = node.widgets.reduce((acc, w) => {
+            acc[w.name] = w;
+            return acc;
+        }, {});
     }
 
-    try { widget.color = color; } catch (e) { }
-    try { widget.text_color = textColor; } catch (e) { }
-
-    widget.label = `${widget.original_displayName} ${disabled ? "(Disabled)" : ""}`;
-}
-
-function toggleQualityWidgets(widgets, value, config) {
-    for (const name in config) {
-        const widget = widgets[name];
+    initWidget(name, prettify = true, customName = "") {
+        const widget = this.widgets[name];
         if (widget) {
-            const enabledTypes = config[name];
-            const isDisabled = !enabledTypes.includes(value);
-            applyWidgetStyle(widget, isDisabled);
+            if (customName !== "") {
+                widget.original_displayName = customName;
+            } else {
+                if (prettify) {
+                    widget.original_displayName = widget.name.replace(/_/g, " ").replace(/\b\w/g, char => char.toUpperCase());
+                } else {
+                    widget.original_displayName = widget.name;
+                }
+            }
+            widget.label = widget.original_displayName;
         }
+        return widget;
     }
-}
 
-function initOriginalName(widget, capitalFirst = true, customName = "") {
-    if (widget) {
-        if (customName !== "")
-            widget.original_displayName = customName
-        else {
-            if (capitalFirst)
-                widget.original_displayName = widget.name.replace(/_/g, " ").replace(/\b\w/g, char => char.toUpperCase());
-            else
-                widget.original_displayName = widget.name;
+    initWidgets(names) {
+        names.forEach(name => this.initWidget(name));
+    }
+
+    applyStyle(widget, disabled) {
+        const dark_grey = "#444";
+        const light_grey = "#666";
+
+        const color = disabled ? dark_grey : undefined;
+        const textColor = disabled ? light_grey : undefined;
+
+        widget.disabled = !!disabled;
+        if (widget.options) {
+            widget.options.color = color;
+            widget.options.text_color = textColor;
         }
-        widget.label = widget.original_displayName;
+
+        try { widget.color = color; } catch (e) { }
+        try { widget.text_color = textColor; } catch (e) { }
+
+        widget.label = `${widget.original_displayName}${disabled ? " (Disabled)" : ""}`;
+    }
+
+    update(triggerValue) {
+        for (const name in this.config) {
+            const widget = this.widgets[name];
+            if (widget) {
+                const enabledTypes = this.config[name];
+                const isDisabled = !enabledTypes.includes(triggerValue);
+                this.applyStyle(widget, isDisabled);
+            }
+        }
+        this.node.setDirtyCanvas(true, true);
+    }
+
+    bindTrigger(triggerName) {
+        const triggerWidget = this.widgets[triggerName];
+        if (!triggerWidget) return;
+
+        const originalCallback = triggerWidget.callback;
+        triggerWidget.callback = (...args) => {
+            const result = originalCallback ? originalCallback.apply(triggerWidget, args) : undefined;
+            this.update(triggerWidget.value);
+            return result;
+        };
+
+        setTimeout(() => this.update(triggerWidget.value), 0);
     }
 }
 
@@ -67,40 +107,19 @@ app.registerExtension({
             nodeType.prototype.onNodeCreated = function () {
                 const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
 
-                const widgets = this.widgets.reduce((acc, w) => {
-                    acc[w.name] = w;
-                    return acc;
-                }, {});
+                const manager = new WidgetManager(this, qualityWidgetsConfig);
+                manager.initWidgets([
+                    "format",
+                    "disable_metadata",
+                    "join_alpha",
+                    "invert_alpha",
+                    "quality",
+                    "compress_level"
+                ]);
+                manager.initWidget("tiff_compression", false, "TIFF Compression");
+                manager.initWidget("tga_rle", false, "TGA RLE Compression");
+                manager.bindTrigger("format");
 
-                const formatWidget = widgets["format"];
-
-                if (formatWidget) {
-                    [
-                        formatWidget,
-                        widgets["disable_metadata"],
-                        widgets["join_alpha"],
-                        widgets["invert_alpha"],
-                        widgets["quality"],
-                        widgets["compress_level"]
-                    ].forEach(w => initOriginalName(w));
-                    initOriginalName(widgets["tiff_compression"], false, "TIFF Compression");
-                    initOriginalName(widgets["tga_rle"], false, "TGA RLE Compression");
-
-                    const updateWidgets = () => {
-                        const qualityType = formatWidget.value;
-                        toggleQualityWidgets(widgets, qualityType, qualityWidgetsConfig);
-                        this.setDirtyCanvas(true, true);
-                    };
-
-                    const originalCallback = formatWidget.callback;
-                    formatWidget.callback = function () {
-                        const result = originalCallback ? originalCallback.apply(this, arguments) : undefined;
-                        updateWidgets();
-                        return result;
-                    };
-
-                    setTimeout(updateWidgets, 0);
-                };
                 return r;
             };
         };
@@ -115,31 +134,34 @@ app.registerExtension({
             nodeType.prototype.onNodeCreated = function () {
                 const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
 
-                const widgets = this.widgets.reduce((acc, w) => {
-                    acc[w.name] = w;
-                    return acc;
-                }, {});
+                const manager = new WidgetManager(this, alphaExclusiveConfig);
+                manager.initWidgets(["bit_depth", "join_alpha", "invert_alpha"]);
+                manager.bindTrigger("bit_depth");
 
-                const bit_depth_widget = widgets["bit_depth"];
+                return r;
+            };
+        };
+    }
+});
 
-                if (bit_depth_widget) {
-                    [bit_depth_widget, widgets["join_alpha"], widgets["invert_alpha"]].forEach(w => initOriginalName(w));
+app.registerExtension({
+    name: "Wakaura.ColorPatchMerge",
+    async beforeRegisterNodeDef(nodeType, nodeData) {
+        if (nodeData.name === "ColorPatchMerge") {
+            const onNodeCreated = nodeType.prototype.onNodeCreated;
+            nodeType.prototype.onNodeCreated = function () {
+                const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
 
-                    const updateWidgets = () => {
-                        const bits = bit_depth_widget.value
-                        toggleQualityWidgets(widgets, bits, alphaExclusiveConfig);
-                        this.setDirtyCanvas(true, true);
-                    };
+                const manager = new WidgetManager(this, colorPatchMergeConfig);
+                manager.initWidgets([
+                    "merge_solution",
+                    "neighborhood",
+                    "min_area",
+                    "iterations",
+                    "use_lab",
+                ]);
+                manager.bindTrigger("merge_solution");
 
-                    const originalCallback = bit_depth_widget.callback;
-                    bit_depth_widget.callback = function () {
-                        const result = originalCallback ? originalCallback.apply(this, arguments) : undefined;
-                        updateWidgets();
-                        return result;
-                    };
-
-                    setTimeout(updateWidgets, 0);
-                };
                 return r;
             };
         };

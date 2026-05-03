@@ -122,4 +122,64 @@ class ImageSaveHelperExt():
             img.putalpha(m_pil)
 
         img.save(os.path.join(folder_paths.get_temp_directory(), tmp_file))
-        return ui.SavedResult(tmp_file, "", io.FolderType.temp)
+        return ui.SavedResult(tmp_file, "", io.FolderType.temp)
+
+    @staticmethod
+    def to_pillow_image(image: torch.Tensor , number: int = 0) -> Image:
+        """
+        Explicitly extract an image from the tensor batch.
+        """
+        img_np = image.cpu().numpy()
+
+        # (B, H, W, C)
+        if img_np.ndim == 4:
+            if img_np.shape[0] > 0:
+                number = max(0, min(number, img_np.shape[0] - 1))
+                img_np = img_np[number]
+        
+        if img_np.dtype in (np.float32, np.float64):
+            img_np = np.clip(img_np * 255, 0, 255).astype(np.uint8)
+ 
+        if img_np.ndim == 3:
+            if img_np.shape[2] == 4:
+                pil_image = Image.fromarray(img_np, mode="RGBA")
+            elif img_np.shape[2] == 3:
+                pil_image = Image.fromarray(img_np, mode="RGB")
+            else:
+                pil_image = Image.fromarray(img_np.squeeze(), mode="L")
+        else:
+            pil_image = Image.fromarray(img_np, mode="L")
+
+        return pil_image
+
+    @staticmethod
+    def to_pillow_images(image: torch.Tensor) -> list[Image]:
+        """
+        Convert the tensor batch to pillow image batch.
+        """
+        img_np = image.detach().cpu().numpy()
+
+        if img_np.ndim == 3:
+            img_np = img_np[None, ...]  # to (1, H, W, C)
+        elif img_np.ndim == 2:
+            img_np = img_np[None, ..., None] # to (1, H, W, 1)
+
+        images = []
+        if img_np.ndim == 4:
+            for img in img_np:
+                if img.dtype in (np.float32, np.float64):
+                    img = np.clip(img * 255, 0, 255).astype(np.uint8)
+
+                if img.ndim == 3:
+                    if img.shape[2] == 4:
+                        pil_image = Image.fromarray(img, mode="RGBA")
+                    elif img.shape[2] == 3:
+                        pil_image = Image.fromarray(img, mode="RGB")
+                    else:
+                        pil_image = Image.fromarray(img.squeeze(), mode="L")
+                else:
+                    pil_image = Image.fromarray(img, mode="L")
+
+                images.append(pil_image)
+
+        return images
