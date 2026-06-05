@@ -1,5 +1,6 @@
 from comfy_api.latest import io, ui
 from PIL import Image
+from PIL.Image import Image as PILImage
 from PIL.PngImagePlugin import PngInfo
 import numpy as np
 import torch
@@ -125,7 +126,7 @@ class ImageSaveHelperExt():
         return ui.SavedResult(tmp_file, "", io.FolderType.temp)
 
     @staticmethod
-    def to_pillow_image(image: torch.Tensor , number: int = 0) -> Image:
+    def to_pillow_image(image: torch.Tensor , number: int = 0) -> PILImage:
         """
         Explicitly extract an image from the tensor batch.
         """
@@ -153,7 +154,7 @@ class ImageSaveHelperExt():
         return pil_image
 
     @staticmethod
-    def to_pillow_images(image: torch.Tensor) -> list[Image]:
+    def to_pillow_images(image: torch.Tensor) -> list[PILImage]:
         """
         Convert the tensor batch to pillow image batch.
         """

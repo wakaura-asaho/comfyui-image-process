@@ -1,5 +1,6 @@
 from comfy_api.latest import io, ui
 import numpy as np
+import logging
 import scipy.ndimage as nd
 from PIL import Image, ImageCms
 from skimage.color import rgb2lab, rgb2hsv, hsv2rgb
@@ -8,6 +9,10 @@ import folder_paths
 import os
 from .image_helper import ImageSaveHelperExt
 from .define import define
+
+
+logger = logging.getLogger("ComfyUI-ImageProcess")
+
 
 class ColorPatchFlatten(io.ComfyNode):
     """
@@ -28,13 +33,13 @@ class ColorPatchFlatten(io.ComfyNode):
                 io.Image.Input(
                     id="image",
                     display_name="Image",
-                    tooltip="The image to be processed."
+                    tooltip="The image to be processed.",
                 ),
                 io.Mask.Input(
                     id="mask",
                     display_name="Alpha Mask",
                     tooltip="Optional alpha channel mask.",
-                    optional=True
+                    optional=True,
                 ),
                 io.Float.Input(
                     id="flatten_tolerance",
@@ -44,34 +49,20 @@ class ColorPatchFlatten(io.ComfyNode):
                     round=0.01,
                     default=0.05,
                     max=1.0,
-                    min=0.00
+                    min=0.00,
+                ),
+                io.Boolean.Input(id="flatten_hue", display_name="H", default=True),
+                io.Boolean.Input(
+                    id="flatten_saturation", display_name="S", default=True
                 ),
                 io.Boolean.Input(
-                    id="flatten_hue",
-                    display_name="H",
-                    default=True
+                    id="flatten_brightness", display_name="V", default=True
                 ),
-                io.Boolean.Input(
-                    id="flatten_saturation",
-                    display_name="S",
-                    default=True
-                ),
-                io.Boolean.Input(
-                    id="flatten_brightness",
-                    display_name="V",
-                    default=True
-                )
             ],
             outputs=[
-                io.Image.Output(
-                    id="output",
-                    display_name="OUTPUT"
-                ),
-                io.Mask.Output(
-                    id="mask",
-                    display_name="ALPHA"
-                )
-            ]
+                io.Image.Output(id="output", display_name="OUTPUT"),
+                io.Mask.Output(id="mask", display_name="ALPHA"),
+            ],
         )
 
     @classmethod
@@ -83,10 +74,10 @@ class ColorPatchFlatten(io.ComfyNode):
         flatten_hue: bool = True,
         flatten_saturation: bool = True,
         flatten_brightness: bool = True,
-        **kwargs
+        **kwargs,
     ) -> io.NodeOutput:
         pil_images = ImageSaveHelperExt.to_pillow_images(image)
-        
+
         alpha_raw_batch = None
         if mask is not None:
             alpha_raw_batch = mask.cpu().numpy()
@@ -95,7 +86,7 @@ class ColorPatchFlatten(io.ComfyNode):
         output_masks = []
         for i, pil_image in enumerate(pil_images):
             pil_image = pil_image.convert("RGB")
-            
+
             alpha_f32 = None
             if alpha_raw_batch is not None:
                 if alpha_raw_batch.ndim == 3:
@@ -103,24 +94,32 @@ class ColorPatchFlatten(io.ComfyNode):
                     current_alpha_raw = alpha_raw_batch[alpha_idx]
                 else:
                     current_alpha_raw = alpha_raw_batch
-                
+
                 if current_alpha_raw.max() > 1.0:
-                    alpha_f32 = np.clip(current_alpha_raw / 255, 0, 1).astype(np.float32)
+                    alpha_f32 = np.clip(current_alpha_raw / 255, 0, 1).astype(
+                        np.float32
+                    )
                 else:
                     alpha_f32 = current_alpha_raw.astype(np.float32)
 
-            rgb_np = np.array(pil_image, dtype=np.float32) / 255.0 # (H, W, 3)
-            
-            if flatten_tolerance > 0 and (flatten_hue or flatten_saturation or flatten_brightness):
+            rgb_np = np.array(pil_image, dtype=np.float32) / 255.0  # (H, W, 3)
+
+            if flatten_tolerance > 0 and (
+                flatten_hue or flatten_saturation or flatten_brightness
+            ):
                 hsv_np = rgb2hsv(rgb_np)
-                
+
                 # Determine patch for mean calculation
                 if alpha_f32 is not None:
                     if alpha_f32.shape[:2] != rgb_np.shape[:2]:
-                        mask_pil = Image.fromarray((alpha_f32 * 255).clip(0, 255).astype(np.uint8), mode="L")
-                        mask_pil = mask_pil.resize((rgb_np.shape[1], rgb_np.shape[0]), Image.LANCZOS)
+                        mask_pil = Image.fromarray(
+                            (alpha_f32 * 255).clip(0, 255).astype(np.uint8), mode="L"
+                        )
+                        mask_pil = mask_pil.resize(
+                            (rgb_np.shape[1], rgb_np.shape[0]), Image.LANCZOS
+                        )
                         alpha_f32 = np.array(mask_pil, dtype=np.float32) / 255.0
-                    
+
                     mask_indices = alpha_f32 > 0.05
                     if np.any(mask_indices):
                         mean_hsv = np.mean(hsv_np[mask_indices], axis=0)
@@ -128,49 +127,62 @@ class ColorPatchFlatten(io.ComfyNode):
                         mean_hsv = np.mean(hsv_np.reshape(-1, 3), axis=0)
                 else:
                     mean_hsv = np.mean(hsv_np.reshape(-1, 3), axis=0)
-                
+
                 # Flatten
                 if flatten_hue:
                     h_diff = np.abs(hsv_np[..., 0] - mean_hsv[0])
                     # Circular hue diff
                     h_diff = np.minimum(h_diff, 1.0 - h_diff)
-                    hsv_np[..., 0] = np.where(h_diff <= flatten_tolerance, mean_hsv[0], hsv_np[..., 0])
-                
+                    hsv_np[..., 0] = np.where(
+                        h_diff <= flatten_tolerance, mean_hsv[0], hsv_np[..., 0]
+                    )
+
                 if flatten_saturation:
                     s_diff = np.abs(hsv_np[..., 1] - mean_hsv[1])
-                    hsv_np[..., 1] = np.where(s_diff <= flatten_tolerance, mean_hsv[1], hsv_np[..., 1])
-                    
+                    hsv_np[..., 1] = np.where(
+                        s_diff <= flatten_tolerance, mean_hsv[1], hsv_np[..., 1]
+                    )
+
                 if flatten_brightness:
                     v_diff = np.abs(hsv_np[..., 2] - mean_hsv[2])
-                    hsv_np[..., 2] = np.where(v_diff <= flatten_tolerance, mean_hsv[2], hsv_np[..., 2])
-                
+                    hsv_np[..., 2] = np.where(
+                        v_diff <= flatten_tolerance, mean_hsv[2], hsv_np[..., 2]
+                    )
+
                 rgb_np = hsv2rgb(hsv_np)
-            
+
             rgb_u8 = np.clip(rgb_np * 255, 0, 255).astype(np.uint8)
 
             if alpha_f32 is not None:
                 alpha_u8 = np.clip(alpha_f32 * 255, 0, 255).astype(np.uint8)
-                rgba_array = np.concatenate([rgb_u8, alpha_u8[..., np.newaxis]], axis=-1)
+                rgba_array = np.concatenate(
+                    [rgb_u8, alpha_u8[..., np.newaxis]], axis=-1
+                )
                 output_image_pil = Image.fromarray(rgba_array, mode="RGBA")
                 output_mask_tensor = torch.from_numpy(alpha_f32)
             else:
                 output_image_pil = Image.fromarray(rgb_u8)
-                output_mask_tensor = torch.zeros((rgb_u8.shape[0], rgb_u8.shape[1]), dtype=torch.float32)
+                output_mask_tensor = torch.zeros(
+                    (rgb_u8.shape[0], rgb_u8.shape[1]), dtype=torch.float32
+                )
 
-            output_tensor = torch.from_numpy(np.array(output_image_pil, dtype=np.float32) / 255.0)
+            output_tensor = torch.from_numpy(
+                np.array(output_image_pil, dtype=np.float32) / 255.0
+            )
             output_images.append(output_tensor)
             output_masks.append(output_mask_tensor)
 
         output_images_batch = torch.stack(output_images, dim=0)
         output_masks_batch = torch.stack(output_masks, dim=0)
-        
+
         return io.NodeOutput(output_images_batch, output_masks_batch)
+
 
 class ColorPatchMerge(io.ComfyNode):
     """
     Groups similar colors and replaces them with their local average.
     """
-    
+
     debug_header = "[ComfyUI-ColorPatchMerge]"
 
     @classmethod
@@ -185,13 +197,13 @@ class ColorPatchMerge(io.ComfyNode):
                 io.Image.Input(
                     id="image",
                     display_name="Image",
-                    tooltip="The image to be processed."
+                    tooltip="The image to be processed.",
                 ),
                 io.Mask.Input(
                     id="mask",
                     display_name="Alpha Mask",
                     tooltip="Optional alpha channel mask.",
-                    optional=True
+                    optional=True,
                 ),
                 io.Float.Input(
                     id="merge_tolerance",
@@ -201,7 +213,7 @@ class ColorPatchMerge(io.ComfyNode):
                     round=0.01,
                     default=0.05,
                     max=1.0,
-                    min=0.00
+                    min=0.00,
                 ),
                 io.Int.Input(
                     id="neighborhood",
@@ -210,7 +222,7 @@ class ColorPatchMerge(io.ComfyNode):
                     step=1,
                     default=3,
                     max=31,
-                    min=3
+                    min=3,
                 ),
                 io.Int.Input(
                     id="min_area",
@@ -219,7 +231,7 @@ class ColorPatchMerge(io.ComfyNode):
                     step=1,
                     default=20,
                     max=1024,
-                    min=2
+                    min=2,
                 ),
                 io.Int.Input(
                     id="iterations",
@@ -228,109 +240,113 @@ class ColorPatchMerge(io.ComfyNode):
                     step=1,
                     default=2,
                     max=16,
-                    min=1
+                    min=1,
                 ),
                 io.Boolean.Input(
                     id="use_lab",
                     display_name="Use Lab Colors",
                     tooltip="Convert RGB space to Lab colors.",
-                    default=True
+                    default=True,
                 ),
                 io.Combo.Input(
                     id="merge_solution",
                     display_name="Merge Solution",
                     tooltip="How to handle the color merging.",
                     options=["Smooth", "Unify"],
-                    default="Smooth"
-                )
+                    default="Smooth",
+                ),
             ],
             outputs=[
-                io.Image.Output(
-                    id="output",
-                    display_name="OUTPUT"
-                ),
-                io.Mask.Output(
-                    id="mask",
-                    display_name="ALPHA"
-                )
-            ]
+                io.Image.Output(id="output", display_name="OUTPUT"),
+                io.Mask.Output(id="mask", display_name="ALPHA"),
+            ],
         )
 
     @classmethod
     def unify_colors(
-            cls, rgb_np: np.ndarray, 
-            tolerance: float = 8.0, 
-            min_area: int = 20,
-            iterations: int = 2,
-            use_lab: bool = True
-        ) -> np.ndarray:
+        cls,
+        rgb_np: np.ndarray,
+        tolerance: float = 8.0,
+        min_area: int = 20,
+        iterations: int = 2,
+        use_lab: bool = True,
+    ) -> np.ndarray:
         orig = rgb_np.astype(np.float32)
-    
+
         if use_lab:
             data_for_quant = rgb2lab(orig)
         else:
             data_for_quant = orig * 255.0
-        
+
         # Coarser quantization
         q = (data_for_quant / tolerance).astype(np.int32)
-        
+
         if use_lab:
             flat_colors = q[..., 0] + q[..., 1] * 1000 + q[..., 2] * 1000000
         else:
             flat_colors = q[..., 0] + q[..., 1] * 300 + q[..., 2] * 90000
-        
-        # Cap the growth footprint size to avoid performance issues 
+
+        # Cap the growth footprint size to avoid performance issues
         footprint_size = min(min_area, 32)
         structure = np.ones((footprint_size, footprint_size), dtype=np.int32)
         connected = flat_colors.copy()
-        
+
         for _ in range(iterations):
             dilated = nd.grey_dilation(connected, footprint=structure)
-            connected = np.where(dilated == flat_colors, flat_colors, dilated)  # Grow regions
-        
-        labels, num_features = nd.label(connected, structure=np.ones((3, 3), dtype=np.int32))
-        
+            connected = np.where(
+                dilated == flat_colors, flat_colors, dilated
+            )  # Grow regions
+
+        labels, num_features = nd.label(
+            connected, structure=np.ones((3, 3), dtype=np.int32)
+        )
+
         index = np.arange(1, num_features + 1)
         mean_r = nd.mean(orig[..., 0], labels, index)
         mean_g = nd.mean(orig[..., 1], labels, index)
         mean_b = nd.mean(orig[..., 2], labels, index)
         means = np.column_stack((mean_r, mean_g, mean_b))
-        
+
         lookup_table = np.vstack(([0, 0, 0], means))
         flattened = lookup_table[labels]
-        
+
         # protect small areas or high-gradient (edge) pixels
         if min_area > 1:
             counts = nd.sum(np.ones_like(labels), labels, index)
-            
+
             lookup_counts = np.zeros(num_features + 1, dtype=counts.dtype)
             lookup_counts[1:] = counts
 
             large_mask = lookup_counts[labels] >= min_area
             large_mask = large_mask[..., None]
-            
+
             # high local variance areas keep original
             gray = np.dot(orig[..., :3], [0.299, 0.587, 0.114])
             local_var = nd.generic_filter(gray, np.var, size=3)
-            edge_mask = local_var > np.percentile(local_var, 85)  # Top ~15% variance = edges
-            
+            edge_mask = local_var > np.percentile(
+                local_var, 85
+            )  # Top ~15% variance = edges
+
             result = np.where(large_mask & ~edge_mask[..., None], flattened, orig)
         else:
             result = flattened
-        
+
         return result
 
     @classmethod
-    def smooth_colors(cls, rgb_np: np.ndarray, tolerance: float = 0.05, neighborhood: int = 3):
+    def smooth_colors(
+        cls, rgb_np: np.ndarray, tolerance: float = 0.05, neighborhood: int = 3
+    ):
         import cv2
+
         simplified = cv2.bilateralFilter(
-            (rgb_np * 255).astype(np.uint8), 
-            d=neighborhood, 
-            sigmaColor=tolerance * 255, 
-            sigmaSpace=neighborhood * 2
+            (rgb_np * 255).astype(np.uint8),
+            d=neighborhood,
+            sigmaColor=tolerance * 255,
+            sigmaSpace=neighborhood * 2,
         )
         return simplified.astype(np.float32) / 255.0
-    
+
     @classmethod
     def execute(
         cls,
@@ -342,10 +358,10 @@ class ColorPatchMerge(io.ComfyNode):
         iterations: int = 2,
         use_lab: bool = True,
         merge_solution: str = "Smooth",
-        **kwargs
+        **kwargs,
     ) -> io.NodeOutput:
         pil_images = ImageSaveHelperExt.to_pillow_images(image)
-        
+
         alpha_raw_batch = None
         if mask is not None:
             alpha_raw_batch = mask.cpu().numpy()
@@ -354,7 +370,7 @@ class ColorPatchMerge(io.ComfyNode):
         output_masks = []
         for i, pil_image in enumerate(pil_images):
             pil_image = pil_image.convert("RGB")
-            
+
             alpha_f32 = None
             if alpha_raw_batch is not None:
                 if alpha_raw_batch.ndim == 3:
@@ -363,48 +379,65 @@ class ColorPatchMerge(io.ComfyNode):
                 else:
                     current_alpha_raw = alpha_raw_batch
                 if current_alpha_raw.max() > 1.0:
-                    alpha_f32 = np.clip(current_alpha_raw / 255, 0, 1).astype(np.float32)
+                    alpha_f32 = np.clip(current_alpha_raw / 255, 0, 1).astype(
+                        np.float32
+                    )
                 else:
                     alpha_f32 = current_alpha_raw.astype(np.float32)
 
-            rgb_np = np.array(pil_image, dtype=np.float32) / 255.0 # (H, W, 3)
+            rgb_np = np.array(pil_image, dtype=np.float32) / 255.0  # (H, W, 3)
 
-            if merge_tolerance > 0 :
+            if merge_tolerance > 0:
                 if merge_solution == "Smooth" and neighborhood > 0:
                     rgb_np = cls.smooth_colors(rgb_np, merge_tolerance, neighborhood)
                 elif merge_solution == "Unify" and min_area > 0:
                     # Scale tolerance appropriately for the unify_colors method
-                    # (default merge_tolerance is 0.05, so * 255 gives ~12.75, which 
+                    # (default merge_tolerance is 0.05, so * 255 gives ~12.75, which
                     # is reasonable for LAB 0-100 or RGB 0-255 ranges).
-                    rgb_np = cls.unify_colors(rgb_np, merge_tolerance * 255, min_area, iterations, use_lab)
+                    rgb_np = cls.unify_colors(
+                        rgb_np, merge_tolerance * 255, min_area, iterations, use_lab
+                    )
             else:
-                print(f"{cls.debug_header} Tolerance is set to zero. The process will be skipped.")
-            
+                logger.info(
+                    f"{cls.debug_header} Tolerance is set to zero. The process will be skipped."
+                )
+
             rgb_u8 = np.clip(rgb_np * 255, 0, 255).astype(np.uint8)
 
             if alpha_f32 is not None:
                 # Resize alpha to match image if needed
                 if alpha_f32.shape[:2] != rgb_u8.shape[:2]:
-                    mask_pil = Image.fromarray((alpha_f32 * 255).clip(0, 255).astype(np.uint8), mode="L")
-                    mask_pil = mask_pil.resize((rgb_u8.shape[1], rgb_u8.shape[0]), Image.LANCZOS)
+                    mask_pil = Image.fromarray(
+                        (alpha_f32 * 255).clip(0, 255).astype(np.uint8), mode="L"
+                    )
+                    mask_pil = mask_pil.resize(
+                        (rgb_u8.shape[1], rgb_u8.shape[0]), Image.LANCZOS
+                    )
                     alpha_f32 = np.array(mask_pil, dtype=np.float32) / 255.0
-                
+
                 alpha_u8 = np.clip(alpha_f32 * 255, 0, 255).astype(np.uint8)
-                rgba_array = np.concatenate([rgb_u8, alpha_u8[..., np.newaxis]], axis=-1)
+                rgba_array = np.concatenate(
+                    [rgb_u8, alpha_u8[..., np.newaxis]], axis=-1
+                )
                 output_image_pil = Image.fromarray(rgba_array, mode="RGBA")
                 output_mask_tensor = torch.from_numpy(alpha_f32)
             else:
                 output_image_pil = Image.fromarray(rgb_u8)
-                output_mask_tensor = torch.zeros((rgb_u8.shape[0], rgb_u8.shape[1]), dtype=torch.float32)
+                output_mask_tensor = torch.zeros(
+                    (rgb_u8.shape[0], rgb_u8.shape[1]), dtype=torch.float32
+                )
 
-            output_tensor = torch.from_numpy(np.array(output_image_pil, dtype=np.float32) / 255.0)
+            output_tensor = torch.from_numpy(
+                np.array(output_image_pil, dtype=np.float32) / 255.0
+            )
             output_images.append(output_tensor)
             output_masks.append(output_mask_tensor)
 
         output_images_batch = torch.stack(output_images, dim=0)
         output_masks_batch = torch.stack(output_masks, dim=0)
-        
+
         return io.NodeOutput(output_images_batch, output_masks_batch)
+
 
 class AchromaticStabilizer(io.ComfyNode):
     """
@@ -424,24 +457,24 @@ class AchromaticStabilizer(io.ComfyNode):
             category=define.author,
             is_experimental=True,
             description="Fix achromatic color instability across the image."
-                        "Pixels with near-zero saturation have their hue snapped to 0 and their saturation zeroed out, then optionally smoothed.",
+            "Pixels with near-zero saturation have their hue snapped to 0 and their saturation zeroed out, then optionally smoothed.",
             inputs=[
                 io.Image.Input(
                     id="image",
                     display_name="Image",
-                    tooltip="The image to be processed."
+                    tooltip="The image to be processed.",
                 ),
                 io.Mask.Input(
                     id="mask",
                     display_name="Alpha Mask",
                     tooltip="Optional alpha channel mask.\nIf provided and preserve_alpha is True, this mask will be used as the alpha channel.",
-                    optional=True
+                    optional=True,
                 ),
                 io.Boolean.Input(
                     id="smooth",
                     display_name="Smooth Transitions",
                     tooltip="Whether to apply a smoothing filter to the corrected areas.",
-                    default=True
+                    default=True,
                 ),
                 io.Float.Input(
                     id="sat_threshold",
@@ -451,7 +484,7 @@ class AchromaticStabilizer(io.ComfyNode):
                     round=0.01,
                     default=0.08,
                     max=1.0,
-                    min=0.0
+                    min=0.0,
                 ),
                 io.Int.Input(
                     id="kernel_size",
@@ -459,30 +492,24 @@ class AchromaticStabilizer(io.ComfyNode):
                     tooltip="The size of the smoothing kernel to apply.",
                     default=3,
                     max=15,
-                    min=1
+                    min=1,
                 ),
                 io.Boolean.Input(
                     id="preserve_alpha",
                     display_name="Preserve Alpha",
                     tooltip="Whether to preserve the alpha channel during processing.",
-                    default=True
+                    default=True,
                 ),
                 io.Boolean.Input(
                     id="invert_alpha",
                     display_name="Invert Alpha",
                     tooltip="Whether to invert the alpha channel before saving.",
-                    default=False
-                )
+                    default=False,
+                ),
             ],
             outputs=[
-                io.Image.Output(
-                    id="output",
-                    display_name="OUTPUT"
-                ),
-                io.Mask.Output(
-                    id="mask",
-                    display_name="ALPHA"
-                )
+                io.Image.Output(id="output", display_name="OUTPUT"),
+                io.Mask.Output(id="mask", display_name="ALPHA"),
             ],
         )
 
@@ -499,7 +526,10 @@ class AchromaticStabilizer(io.ComfyNode):
         kernel_size = int(kwargs.get("kernel_size", 3))
         mask = kwargs.get("mask")
         mask_id = id(mask) if mask is not None else 0
-        return hash((preserve_alpha, smooth, sat_threshold, kernel_size, mask_id)) & 0xFFFFFFFF
+        return (
+            hash((preserve_alpha, smooth, sat_threshold, kernel_size, mask_id))
+            & 0xFFFFFFFF
+        )
 
     @classmethod
     def check_lazy_status(cls, *args, **kwargs) -> list[str]:
@@ -511,8 +541,12 @@ class AchromaticStabilizer(io.ComfyNode):
         preserve_alpha = bool(kwargs.get("preserve_alpha", False))
         image = kwargs.get("image")
         # Only validate if image is already a PIL Image
-        if preserve_alpha and isinstance(image, Image.Image) and image.mode not in ("RGBA", "LA", "P"):
-            print(
+        if (
+            preserve_alpha
+            and isinstance(image, Image.Image)
+            and image.mode not in ("RGBA", "LA", "P")
+        ):
+            logger.warning(
                 f"{cls.debug_header} Warning: preserve_alpha requested but source image has no alpha channel. "
                 f"   Output will be generated as an opaque image."
             )
@@ -520,24 +554,25 @@ class AchromaticStabilizer(io.ComfyNode):
 
     @classmethod
     def execute(
-        cls, image: torch.Tensor,
+        cls,
+        image: torch.Tensor,
         mask: torch.Tensor | None = None,
         smooth: bool = True,
         sat_threshold: float = 0.08,
         kernel_size: int = 3,
         preserve_alpha: bool = True,
         invert_alpha: bool = False,
-        **kwargs
+        **kwargs,
     ) -> io.NodeOutput:
         if kernel_size % 2 == 0:
             kernel_size += 1
-            print(
+            logger.warning(
                 f"{cls.debug_header} kernel_size rounded up to {kernel_size} "
                 f"(must be odd for a symmetric smoothing kernel)."
             )
 
         pil_images = ImageSaveHelperExt.to_pillow_images(image)
-        
+
         alpha_raw_batch = None
         if preserve_alpha and mask is not None:
             alpha_raw_batch = mask.cpu().numpy()
@@ -559,7 +594,9 @@ class AchromaticStabilizer(io.ComfyNode):
                 else:
                     current_alpha_raw = alpha_raw_batch
                 if current_alpha_raw.max() > 1.0:
-                    alpha_f32 = np.clip(current_alpha_raw / 255, 0, 1).astype(np.float32)
+                    alpha_f32 = np.clip(current_alpha_raw / 255, 0, 1).astype(
+                        np.float32
+                    )
                 else:
                     alpha_f32 = current_alpha_raw.astype(np.float32)
                 pil_image = pil_image.convert("RGB")
@@ -569,32 +606,34 @@ class AchromaticStabilizer(io.ComfyNode):
             else:
                 pil_image = pil_image.convert("RGB")
 
-            rgb = np.array(pil_image, dtype=np.float32) / 255 # (H, W, 3)
+            rgb = np.array(pil_image, dtype=np.float32) / 255  # (H, W, 3)
 
             c_max = rgb.max(axis=-1)
             c_min = rgb.min(axis=-1)
-            chroma = c_max - c_min # absolute chroma
-     
+            chroma = c_max - c_min  # absolute chroma
+
             neutral_mask = chroma < sat_threshold
 
             rgb_original = rgb.copy()
-     
+
             # Replace artifact pixels with their luminance grey.
-            grey_value = rgb.mean(axis=-1, keepdims=True) # (H, W, 1)
+            grey_value = rgb.mean(axis=-1, keepdims=True)  # (H, W, 1)
             rgb[neutral_mask] = np.repeat(grey_value, 3, axis=-1)[neutral_mask]
 
             if smooth:
                 try:
-                    smoothed_original = nd.uniform_filter(rgb_original, size=[kernel_size, kernel_size, 1])
+                    smoothed_original = nd.uniform_filter(
+                        rgb_original, size=[kernel_size, kernel_size, 1]
+                    )
                     mask3 = np.stack([neutral_mask] * 3, axis=-1)
                     rgb = np.where(mask3, smoothed_original, rgb)
                 except Exception as exc:
-                    print(
+                    logger.warning(
                         f"{cls.debug_header} Warning: smoothing failed ({exc}). "
                         f"Output will use unsmoothed correction."
                     )
-     
-            rgb_u8 = np.clip(rgb * 255, 0, 255).astype(np.uint8) # (H, W, 3)
+
+            rgb_u8 = np.clip(rgb * 255, 0, 255).astype(np.uint8)  # (H, W, 3)
             if preserve_alpha and alpha_f32 is not None:
                 alpha_preserved = True
                 # Resize alpha to match image if needed.
@@ -605,13 +644,15 @@ class AchromaticStabilizer(io.ComfyNode):
                     target_wh = (rgb_u8.shape[1], rgb_u8.shape[0])
                     mask_pil = mask_pil.resize(target_wh, Image.LANCZOS)
                     alpha_f32 = np.array(mask_pil, dtype=np.float32) / 255.0
-     
+
                 if invert_alpha:
                     alpha_f32 = 1.0 - alpha_f32
-     
+
                 alpha_u8 = np.clip(alpha_f32 * 255, 0, 255).astype(np.uint8)
-     
-                rgba_array = np.concatenate([rgb_u8, alpha_u8[..., np.newaxis]], axis=-1)
+
+                rgba_array = np.concatenate(
+                    [rgb_u8, alpha_u8[..., np.newaxis]], axis=-1
+                )
                 output_image_pil = Image.fromarray(rgba_array, mode="RGBA")
 
                 output_mask_tensor = torch.from_numpy(alpha_f32)
@@ -621,25 +662,31 @@ class AchromaticStabilizer(io.ComfyNode):
                     (rgb_u8.shape[0], rgb_u8.shape[1]), dtype=torch.float32
                 )
 
-            output_tensor = torch.from_numpy(np.array(output_image_pil, dtype=np.float32) / 255.0)
-            
+            output_tensor = torch.from_numpy(
+                np.array(output_image_pil, dtype=np.float32) / 255.0
+            )
+
             output_images.append(output_tensor)
             output_masks.append(output_mask_tensor)
 
         if alpha_preserved:
-            print(f"{cls.debug_header} Alpha channel preserved in output image.")
+            logger.info(f"{cls.debug_header} Alpha channel preserved in output image.")
         else:
-            print(f"{cls.debug_header} No alpha channel preserved; output image is opaque.")
+            logger.info(
+                f"{cls.debug_header} No alpha channel preserved; output image is opaque."
+            )
 
         output_images_batch = torch.stack(output_images, dim=0)
         output_masks_batch = torch.stack(output_masks, dim=0)
-        
+
         return io.NodeOutput(output_images_batch, output_masks_batch)
+
 
 class LoadICCProfile(io.ComfyNode):
     """
     Loads an ICC color profile from the models/icc_profiles folder.
     """
+
     icc_folder = "icc_profiles"
 
     @classmethod
@@ -649,14 +696,16 @@ class LoadICCProfile(io.ComfyNode):
 
         valid_profiles = []
         for cp in color_profiles:
-            if cp.lower().endswith(('.icc', '.icm')):
+            if cp.lower().endswith((".icc", ".icm")):
                 try:
-                    profile = ImageCms.getOpenProfile(folder_paths.get_full_path(cls.icc_folder, cp))
+                    profile = ImageCms.getOpenProfile(
+                        folder_paths.get_full_path(cls.icc_folder, cp)
+                    )
                     if profile:
                         valid_profiles.append(cp)
                 except (IOError, TypeError, Exception):
-                    print(f"Skipping invalid profile: {cp}")
-                    
+                    logger.warning(f"Skipping invalid profile: {cp}")
+
         return valid_profiles
 
     @staticmethod
@@ -666,7 +715,7 @@ class LoadICCProfile(io.ComfyNode):
                 "model": profile.profile.model,
                 "manufacturer": profile.profile.manufacturer,
                 "description": profile.profile.profile_description,
-                "copyright": profile.profile.copyright
+                "copyright": profile.profile.copyright,
             }
         else:
             return {}
@@ -693,19 +742,17 @@ class LoadICCProfile(io.ComfyNode):
                 io.Combo.Input(
                     id="profile",
                     display_name="Profile",
-                    options=cls.get_valid_icc_profiles(folder_paths.get_filename_list(cls.icc_folder)),
+                    options=cls.get_valid_icc_profiles(
+                        folder_paths.get_filename_list(cls.icc_folder)
+                    ),
                 )
             ],
             outputs=[
                 io.Custom("ICC_PROFILE").Output(
-                    id="icc_profile",
-                    display_name="ICC_PROFILE"
+                    id="icc_profile", display_name="ICC_PROFILE"
                 ),
-                io.String.Output(
-                    id="icc_profile_info",
-                    display_name="ICC_INFO"
-                )
-            ]
+                io.String.Output(id="icc_profile_info", display_name="ICC_INFO"),
+            ],
         )
 
     @classmethod
@@ -718,17 +765,19 @@ class LoadICCProfile(io.ComfyNode):
         icc_info = ImageCms.getOpenProfile(path)
         return io.NodeOutput(icc_data, cls.get_icc_profile_info_plain_text(icc_info))
 
+
 class SaveImageAdvanced(io.ComfyNode):
     """
     Saves images to disk with additional options for metadata and compression.
     """
+
     output_dir = folder_paths.get_output_directory()
     prefix_append = ""
 
     debug_header = "[ComfyUI-SaveImageAdvanced]"
 
     web_unsupported_preview_formats = ["tiff", "tga"]
-    alpha_supported_formats = ["png", "tiff", "webp", "bmp", "tga"]
+    alpha_supported_formats = ["png", "tiff", "webp", "bmp", "tga", "avif"]
     icc_unsupported_formats = ["tga", "bmp"]
 
     @classmethod
@@ -742,37 +791,37 @@ class SaveImageAdvanced(io.ComfyNode):
                 io.Image.Input(
                     id="images",
                     display_name="Images",
-                    tooltip="The images to be saved."
+                    tooltip="The images to be saved.",
                 ),
                 io.Mask.Input(
                     id="masks",
                     display_name="Alpha Masks",
                     tooltip="Optional alpha channel masks to clip the saved images. If provided, these masks will be applied to the corresponding images before saving.",
-                    optional=True
+                    optional=True,
                 ),
                 io.Custom("ICC_PROFILE").Input(
                     id="icc_profile",
                     display_name="ICC Profile",
                     tooltip="Optional ICC color profile to embed into the saved images.",
-                    optional=True
+                    optional=True,
                 ),
                 io.Boolean.Input(
                     id="disable_metadata",
                     display_name="Disable Metadata",
                     tooltip="Whether to include the metadata to the saved image.",
-                    default=True
+                    default=True,
                 ),
                 io.Boolean.Input(
                     id="join_alpha",
                     display_name="Join Alpha Channel",
                     tooltip="Clip the image with the provided mask.\nPlease note this does not work on JPG format.",
-                    default=False
+                    default=False,
                 ),
                 io.Boolean.Input(
                     id="invert_alpha",
                     display_name="Invert Alpha",
                     tooltip="Whether to invert the alpha channel before saving.",
-                    default=False
+                    default=False,
                 ),
                 io.Int.Input(
                     id="dpi",
@@ -781,7 +830,7 @@ class SaveImageAdvanced(io.ComfyNode):
                     default=define.printing_dpi,
                     min=1,
                     max=600,
-                    display_mode=io.NumberDisplay.slider
+                    display_mode=io.NumberDisplay.slider,
                 ),
                 io.Int.Input(
                     id="compress_level",
@@ -790,7 +839,7 @@ class SaveImageAdvanced(io.ComfyNode):
                     default=4,
                     min=0,
                     max=9,
-                    display_mode=io.NumberDisplay.slider
+                    display_mode=io.NumberDisplay.slider,
                 ),
                 io.Int.Input(
                     id="quality",
@@ -799,40 +848,49 @@ class SaveImageAdvanced(io.ComfyNode):
                     default=90,
                     min=1,
                     max=100,
-                    display_mode=io.NumberDisplay.slider
+                    display_mode=io.NumberDisplay.slider,
                 ),
                 io.Combo.Input(
                     id="tiff_compression",
                     display_name="TIFF Compression",
                     tooltip="The compression to use when saving images as TIFF.",
-                    options=["none", "tiff_lzw", "tiff_deflate", "tiff_adobe_deflate", "packbits", "jpeg", "tiff_jpeg", "tiff_ccitt"],
-                    default="none"
+                    options=[
+                        "none",
+                        "tiff_lzw",
+                        "tiff_deflate",
+                        "tiff_adobe_deflate",
+                        "packbits",
+                        "jpeg",
+                        "tiff_jpeg",
+                        "tiff_ccitt",
+                    ],
+                    default="none",
                 ),
                 io.Boolean.Input(
                     id="tga_rle",
                     display_name="TGA RLE Compression",
                     tooltip="Whether to use RLE compression when saving as TGA.",
-                    default=True
+                    default=True,
                 ),
                 io.Combo.Input(
                     id="format",
                     display_name="Format",
                     tooltip="The format to save the image in.",
-                    options=["png", "jpg", "webp", "tiff", "bmp", "tga"],
-                    default="png"
+                    options=["png", "jpg", "webp", "tiff", "bmp", "tga", "avif"],
+                    default="png",
                 ),
                 io.String.Input(
                     id="filename_prefix",
                     display_name="Filename Prefix",
                     tooltip="Prefix for the saved image filenames.\nEach image will be saved as {prefix}_{index}.{format}.",
-                    default=define.default_file_name
+                    default=define.default_file_name,
                 ),
                 io.Boolean.Input(
                     id="save_to_input_folder",
                     display_name="Save to Input Folder",
                     tooltip="Whether to sync the image to the input folder.",
-                    default=False
-                )
+                    default=False,
+                ),
             ],
             hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
             is_output_node=True,
@@ -840,7 +898,8 @@ class SaveImageAdvanced(io.ComfyNode):
 
     @classmethod
     def execute(
-        cls, images: torch.Tensor,
+        cls,
+        images: torch.Tensor,
         masks: torch.Tensor | None = None,
         filename_prefix: str = define.default_file_name,
         disable_metadata: bool = True,
@@ -854,16 +913,28 @@ class SaveImageAdvanced(io.ComfyNode):
         dpi: int = define.printing_dpi,
         tga_rle: bool = True,
         icc_profile: bytes | None = None,
-        **kwargs
+        **kwargs,
     ) -> io.NodeOutput:
-        f_output_folder, filename, c, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0])
+        f_output_folder, filename, c, subfolder, filename_prefix = (
+            folder_paths.get_save_image_path(
+                filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0]
+            )
+        )
         f_input_folder = os.path.join(folder_paths.get_input_directory(), subfolder)
 
         results = []
-        tmp_results = [] # For special file format that the web cannot display properly.
-        metadata = not disable_metadata and ImageSaveHelperExt.create_metadata_png(cls) or None
-        exif_data = not disable_metadata and ImageSaveHelperExt.create_metadata_exif(cls) or None
-        for (batch_number, image) in enumerate(images):
+        tmp_results = (
+            []
+        )  # For special file format that the web cannot display properly.
+        metadata = (
+            not disable_metadata and ImageSaveHelperExt.create_metadata_png(cls) or None
+        )
+        exif_data = (
+            not disable_metadata
+            and ImageSaveHelperExt.create_metadata_exif(cls)
+            or None
+        )
+        for batch_number, image in enumerate(images):
             mode = "RGBA"
             save_options = {}
             if format == "jpg":
@@ -872,14 +943,20 @@ class SaveImageAdvanced(io.ComfyNode):
                 if not disable_metadata:
                     save_options["exif"] = exif_data
             elif format == "webp":
-                save_options = {"quality": quality, "lossless": False, "dpi": (dpi, dpi)}
+                save_options = {
+                    "quality": quality,
+                    "lossless": False,
+                    "dpi": (dpi, dpi),
+                }
                 if not disable_metadata:
                     save_options["exif"] = exif_data
             elif format == "tiff":
                 # CCITT compression (Group 3/4 fax) only supports 1-bit bilevel
                 # images. Convert to mode "1" to avoid "encoder error -2".
                 if tiff_compression == "tiff_ccitt":
-                    print(f"{cls.debug_header} tiff_ccitt compression requires a bilevel (1-bit) image.")
+                    logger.warning(
+                        f"{cls.debug_header} tiff_ccitt compression requires a bilevel (1-bit) image."
+                    )
                     mode = "1"
                 save_options = {"compression": tiff_compression, "dpi": (dpi, dpi)}
                 if not disable_metadata:
@@ -890,11 +967,24 @@ class SaveImageAdvanced(io.ComfyNode):
                 save_options = {"dpi": (dpi, dpi)}
             elif format == "tga":
                 save_options = {"compression": "tga_rle" if tga_rle else None}
-            else: # PNG
-                save_options = {"pnginfo": metadata, "compress_level": compress_level, "dpi": (dpi, dpi)}
+            elif format == "avif":
+                mode = "RGBA" if join_alpha else "RGB"
+                save_options = {
+                    "quality": quality,
+                    "speed": 6,
+                    "dpi": (dpi, dpi),
+                }
+            else:  # PNG
+                save_options = {
+                    "pnginfo": metadata,
+                    "compress_level": compress_level,
+                    "dpi": (dpi, dpi),
+                }
 
             if (format in cls.icc_unsupported_formats) and icc_profile is not None:
-                print(f"{cls.debug_header} ICC Profile discarded due to the incompatible format: {format.upper()}")
+                logger.warning(
+                    f"{cls.debug_header} ICC Profile discarded due to the incompatible format: {format.upper()}"
+                )
 
             mask = None
             if (format in cls.alpha_supported_formats) and join_alpha:
@@ -904,27 +994,43 @@ class SaveImageAdvanced(io.ComfyNode):
                     mask = 1.0 - mask
 
             result = ImageSaveHelperExt.get_save_result(
-                image=image, mask=mask, convert_mode=mode, join_mask=join_alpha, filename=filename,
-                full_output_folder=f_output_folder, full_input_folder=f_input_folder, subfolder=subfolder,
-                batch_number=batch_number, counter=c,
-                file_ext=format, save_to_input_folder=save_to_input_folder,
+                image=image,
+                mask=mask,
+                convert_mode=mode,
+                join_mask=join_alpha,
+                filename=filename,
+                full_output_folder=f_output_folder,
+                full_input_folder=f_input_folder,
+                subfolder=subfolder,
+                batch_number=batch_number,
+                counter=c,
+                file_ext=format,
+                save_to_input_folder=save_to_input_folder,
                 save_kwargs=save_options,
-                icc_profile=icc_profile
+                icc_profile=icc_profile,
             )
 
-            if (format in cls.web_unsupported_preview_formats):
+            if format in cls.web_unsupported_preview_formats:
                 tmp_results.append(ImageSaveHelperExt.get_save_result_temp(image, mask))
             else:
                 results.append(result)
 
             c += 1
 
-        return io.NodeOutput(ui=(ui.SavedImages(tmp_results) if format in cls.web_unsupported_preview_formats else ui.SavedImages(results)))
+        return io.NodeOutput(
+            ui=(
+                ui.SavedImages(tmp_results)
+                if format in cls.web_unsupported_preview_formats
+                else ui.SavedImages(results)
+            )
+        )
+
 
 class SaveImageJPG(io.ComfyNode):
     """
     Saves images to disk as JPG files.
     """
+
     output_dir = folder_paths.get_output_directory()
     prefix_append = ""
 
@@ -941,13 +1047,13 @@ class SaveImageJPG(io.ComfyNode):
                 io.Image.Input(
                     id="images",
                     display_name="Images",
-                    tooltip="The images to be saved."
+                    tooltip="The images to be saved.",
                 ),
                 io.String.Input(
                     id="filename_prefix",
                     display_name="Filename Prefix",
                     tooltip="Prefix for the saved image filenames.\nEach image will be saved as {prefix}_{index}.{format}.",
-                    default=define.default_file_name
+                    default=define.default_file_name,
                 ),
             ],
             hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
@@ -959,27 +1065,46 @@ class SaveImageJPG(io.ComfyNode):
         cls,
         images: torch.Tensor,
         filename_prefix: str = define.default_file_name,
-        **kwargs
+        **kwargs,
     ) -> io.NodeOutput:
-        f_output_folder, filename, c, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0])
+        f_output_folder, filename, c, subfolder, filename_prefix = (
+            folder_paths.get_save_image_path(
+                filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0]
+            )
+        )
         results = []
-        for (batch_number, image) in enumerate(images):
+        for batch_number, image in enumerate(images):
             result = ImageSaveHelperExt.get_save_result(
-                image=image, mask=None, convert_mode="RGB", join_mask=False, filename=filename,
-                full_output_folder=f_output_folder, full_input_folder=None, subfolder=subfolder,
-                batch_number=batch_number, counter=c, file_ext="jpg", save_to_input_folder=False,
-                save_kwargs={"quality": 95, "optimize": True, "dpi": (define.screen_dpi, define.screen_dpi)}
+                image=image,
+                mask=None,
+                convert_mode="RGB",
+                join_mask=False,
+                filename=filename,
+                full_output_folder=f_output_folder,
+                full_input_folder=None,
+                subfolder=subfolder,
+                batch_number=batch_number,
+                counter=c,
+                file_ext="jpg",
+                save_to_input_folder=False,
+                save_kwargs={
+                    "quality": 95,
+                    "optimize": True,
+                    "dpi": (define.screen_dpi, define.screen_dpi),
+                },
             )
 
             results.append(result)
             c += 1
-            
+
         return io.NodeOutput(ui=ui.SavedImages(results))
+
 
 class SaveImageAdvancedJPG(io.ComfyNode):
     """
     Saves images to disk as JPG files with additional options.
     """
+
     output_dir = folder_paths.get_output_directory()
     prefix_append = ""
 
@@ -996,19 +1121,19 @@ class SaveImageAdvancedJPG(io.ComfyNode):
                 io.Image.Input(
                     id="images",
                     display_name="Images",
-                    tooltip="The images to be saved."
+                    tooltip="The images to be saved.",
                 ),
                 io.Boolean.Input(
                     id="disable_metadata",
                     display_name="Disable Metadata",
                     tooltip="Disable embedding EXIF data into the saved images.\nEmbed into `UserComment`.",
-                    default=False
+                    default=False,
                 ),
                 io.String.Input(
                     id="filename_prefix",
                     display_name="Filename Prefix",
                     tooltip="The prefix to use for the filename.",
-                    default=define.default_file_name
+                    default=define.default_file_name,
                 ),
                 io.Int.Input(
                     id="dpi",
@@ -1017,7 +1142,7 @@ class SaveImageAdvancedJPG(io.ComfyNode):
                     default=define.printing_dpi,
                     min=1,
                     max=600,
-                    display_mode=io.NumberDisplay.slider
+                    display_mode=io.NumberDisplay.slider,
                 ),
                 io.Int.Input(
                     id="quality",
@@ -1026,34 +1151,39 @@ class SaveImageAdvancedJPG(io.ComfyNode):
                     default=95,
                     min=1,
                     max=100,
-                    display_mode=io.NumberDisplay.slider
+                    display_mode=io.NumberDisplay.slider,
                 ),
                 io.Boolean.Input(
                     id="save_to_input_folder",
                     display_name="Save to Input Folder",
                     tooltip="Whether to sync the image to the input folder.",
-                    default=False
+                    default=False,
                 ),
             ],
             hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
             is_output_node=True,
         )
-    
+
     @classmethod
-    def execute(cls,
+    def execute(
+        cls,
         images: torch.Tensor,
         filename_prefix: str = define.default_file_name,
         disable_metadata: bool = False,
         dpi: int = define.screen_dpi,
         quality: int = 95,
         save_to_input_folder: bool = False,
-        **kwargs
+        **kwargs,
     ) -> io.NodeOutput:
-        f_output_folder, filename, c, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0])
+        f_output_folder, filename, c, subfolder, filename_prefix = (
+            folder_paths.get_save_image_path(
+                filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0]
+            )
+        )
         f_input_folder = os.path.join(folder_paths.get_input_directory(), subfolder)
 
         results = []
-        for (batch_number, image) in enumerate(images):
+        for batch_number, image in enumerate(images):
             save_options = {
                 "quality": quality,
                 "optimize": True,
@@ -1066,11 +1196,19 @@ class SaveImageAdvancedJPG(io.ComfyNode):
                     save_options["exif"] = exif_data
 
             result = ImageSaveHelperExt.get_save_result(
-                image=image, mask=None, convert_mode="RGB", join_mask=False, filename=filename,
-                full_output_folder=f_output_folder, full_input_folder=f_input_folder, subfolder=subfolder,
-                batch_number=batch_number, counter=c,
-                file_ext="jpg", save_to_input_folder=save_to_input_folder,
-                save_kwargs=save_options
+                image=image,
+                mask=None,
+                convert_mode="RGB",
+                join_mask=False,
+                filename=filename,
+                full_output_folder=f_output_folder,
+                full_input_folder=f_input_folder,
+                subfolder=subfolder,
+                batch_number=batch_number,
+                counter=c,
+                file_ext="jpg",
+                save_to_input_folder=save_to_input_folder,
+                save_kwargs=save_options,
             )
 
             results.append(result)
@@ -1078,10 +1216,12 @@ class SaveImageAdvancedJPG(io.ComfyNode):
 
         return io.NodeOutput(ui=ui.SavedImages(results))
 
+
 class SaveImageBMP(io.ComfyNode):
     """
     Saves images to disk as BMP files.
     """
+
     output_dir = folder_paths.get_output_directory()
     prefix_append = ""
 
@@ -1098,13 +1238,13 @@ class SaveImageBMP(io.ComfyNode):
                 io.Image.Input(
                     id="images",
                     display_name="Images",
-                    tooltip="The images to be saved."
+                    tooltip="The images to be saved.",
                 ),
                 io.String.Input(
                     id="filename_prefix",
                     display_name="Filename Prefix",
                     tooltip="Prefix for the saved image filenames.\nEach image will be saved as {prefix}_{index}.{format}.",
-                    default=define.default_file_name
+                    default=define.default_file_name,
                 ),
             ],
             hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
@@ -1116,27 +1256,42 @@ class SaveImageBMP(io.ComfyNode):
         cls,
         images: torch.Tensor,
         filename_prefix: str = define.default_file_name,
-        **kwargs
+        **kwargs,
     ) -> io.NodeOutput:
-        f_output_folder, filename, c, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0])
+        f_output_folder, filename, c, subfolder, filename_prefix = (
+            folder_paths.get_save_image_path(
+                filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0]
+            )
+        )
         results = []
-        for (batch_number, image) in enumerate(images):
+        for batch_number, image in enumerate(images):
             result = ImageSaveHelperExt.get_save_result(
-                image=image, mask=None, convert_mode="RGB", join_mask=False, filename=filename,
-                full_output_folder=f_output_folder, full_input_folder=None, subfolder=subfolder,
-                batch_number=batch_number, counter=c, file_ext="bmp", save_to_input_folder=False,
-                save_kwargs={"dpi": (define.screen_dpi, define.screen_dpi)}
+                image=image,
+                mask=None,
+                convert_mode="RGB",
+                join_mask=False,
+                filename=filename,
+                full_output_folder=f_output_folder,
+                full_input_folder=None,
+                subfolder=subfolder,
+                batch_number=batch_number,
+                counter=c,
+                file_ext="bmp",
+                save_to_input_folder=False,
+                save_kwargs={"dpi": (define.screen_dpi, define.screen_dpi)},
             )
 
             results.append(result)
             c += 1
-            
+
         return io.NodeOutput(ui=ui.SavedImages(results))
+
 
 class SaveImageAdvancedBMP(io.ComfyNode):
     """
     Saves images to disk as BMP files with additional options.
     """
+
     output_dir = folder_paths.get_output_directory()
     prefix_append = ""
 
@@ -1153,38 +1308,38 @@ class SaveImageAdvancedBMP(io.ComfyNode):
                 io.Image.Input(
                     id="images",
                     display_name="Images",
-                    tooltip="The images to be saved."
+                    tooltip="The images to be saved.",
                 ),
                 io.Mask.Input(
                     id="masks",
                     display_name="Alpha Masks",
                     tooltip="Optional alpha channel masks to clip the saved images. If provided, these masks will be applied to the corresponding images before saving.",
-                    optional=True
+                    optional=True,
                 ),
                 io.Combo.Input(
                     id="bit_depth",
                     display_name="Bit Depth",
                     tooltip="The bit depth to use when saving images as BMP.\n32bit supports alpha channel.",
                     options=["24bit", "32bit"],
-                    default="24bit"
+                    default="24bit",
                 ),
                 io.Boolean.Input(
                     id="join_alpha",
                     display_name="Join Alpha Channel",
                     tooltip="Clip the image with the provided mask.\nPlease note this only works on 32bit bit depth.",
-                    default=False
+                    default=False,
                 ),
                 io.Boolean.Input(
                     id="invert_alpha",
                     display_name="Invert Alpha",
                     tooltip="Whether to invert the alpha channel before saving.",
-                    default=False
+                    default=False,
                 ),
                 io.String.Input(
                     id="filename_prefix",
                     display_name="Filename Prefix",
                     tooltip="The prefix to use for the filename.",
-                    default=define.default_file_name
+                    default=define.default_file_name,
                 ),
                 io.Int.Input(
                     id="dpi",
@@ -1193,21 +1348,22 @@ class SaveImageAdvancedBMP(io.ComfyNode):
                     default=define.printing_dpi,
                     min=1,
                     max=600,
-                    display_mode=io.NumberDisplay.slider
+                    display_mode=io.NumberDisplay.slider,
                 ),
                 io.Boolean.Input(
                     id="save_to_input_folder",
                     display_name="Save to Input Folder",
                     tooltip="Whether to sync the image to the input folder.",
-                    default=False
+                    default=False,
                 ),
             ],
             hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
             is_output_node=True,
         )
-    
+
     @classmethod
-    def execute(cls,
+    def execute(
+        cls,
         images: torch.Tensor,
         masks: torch.Tensor | None = None,
         bit_depth: str = "24bit",
@@ -1216,13 +1372,17 @@ class SaveImageAdvancedBMP(io.ComfyNode):
         filename_prefix: str = define.default_file_name,
         dpi: int = define.printing_dpi,
         save_to_input_folder: bool = False,
-        **kwargs
+        **kwargs,
     ) -> io.NodeOutput:
-        f_output_folder, filename, c, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0])
+        f_output_folder, filename, c, subfolder, filename_prefix = (
+            folder_paths.get_save_image_path(
+                filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0]
+            )
+        )
         f_input_folder = os.path.join(folder_paths.get_input_directory(), subfolder)
 
         results = []
-        for (batch_number, image) in enumerate(images):
+        for batch_number, image in enumerate(images):
             mode = "RGBA" if bit_depth == "32bit" else "RGB"
             save_options = {
                 "dpi": (dpi, dpi),
@@ -1236,11 +1396,19 @@ class SaveImageAdvancedBMP(io.ComfyNode):
                     mask = 1.0 - mask
 
             result = ImageSaveHelperExt.get_save_result(
-                image=image, mask=mask, convert_mode=mode, join_mask=join_alpha, filename=filename,
-                full_output_folder=f_output_folder, full_input_folder=f_input_folder, subfolder=subfolder,
-                batch_number=batch_number, counter=c,
-                file_ext="bmp", save_to_input_folder=save_to_input_folder,
-                save_kwargs=save_options
+                image=image,
+                mask=mask,
+                convert_mode=mode,
+                join_mask=join_alpha,
+                filename=filename,
+                full_output_folder=f_output_folder,
+                full_input_folder=f_input_folder,
+                subfolder=subfolder,
+                batch_number=batch_number,
+                counter=c,
+                file_ext="bmp",
+                save_to_input_folder=save_to_input_folder,
+                save_kwargs=save_options,
             )
 
             results.append(result)
@@ -1253,6 +1421,7 @@ class SaveImageTIFF(io.ComfyNode):
     """
     Saves images to disk as TIFF files.
     """
+
     output_dir = folder_paths.get_output_directory()
     prefix_append = ""
 
@@ -1269,19 +1438,19 @@ class SaveImageTIFF(io.ComfyNode):
                 io.Image.Input(
                     id="images",
                     display_name="Images",
-                    tooltip="The images to be saved."
+                    tooltip="The images to be saved.",
                 ),
                 io.Mask.Input(
                     id="masks",
                     display_name="Alpha Masks",
                     tooltip="Optional alpha channel masks to clip the saved images. If provided, these masks will be applied to the corresponding images before saving.",
-                    optional=True
+                    optional=True,
                 ),
                 io.String.Input(
                     id="filename_prefix",
                     display_name="Filename Prefix",
                     tooltip="Prefix for the saved image filenames.\nEach image will be saved as {prefix}_{index}.{format}.",
-                    default=define.default_file_name
+                    default=define.default_file_name,
                 ),
             ],
             hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
@@ -1294,12 +1463,16 @@ class SaveImageTIFF(io.ComfyNode):
         images: torch.Tensor,
         masks: torch.Tensor | None = None,
         filename_prefix: str = define.default_file_name,
-        **kwargs
+        **kwargs,
     ) -> io.NodeOutput:
-        f_output_folder, filename, c, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0])
-        
+        f_output_folder, filename, c, subfolder, filename_prefix = (
+            folder_paths.get_save_image_path(
+                filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0]
+            )
+        )
+
         preview_results = []
-        for (batch_number, image) in enumerate(images):
+        for batch_number, image in enumerate(images):
             mode = "RGB"
             mask = None
             if masks is not None:
@@ -1310,10 +1483,22 @@ class SaveImageTIFF(io.ComfyNode):
 
             # Drop the result
             ImageSaveHelperExt.get_save_result(
-                image=image, mask=mask, convert_mode=mode, join_mask=should_join_mask, filename=filename,
-                full_output_folder=f_output_folder, full_input_folder=None, subfolder=subfolder,
-                batch_number=batch_number, counter=c, file_ext="tiff", save_to_input_folder=False,
-                save_kwargs={"compression": "none", "dpi": (define.screen_dpi, define.screen_dpi)}
+                image=image,
+                mask=mask,
+                convert_mode=mode,
+                join_mask=should_join_mask,
+                filename=filename,
+                full_output_folder=f_output_folder,
+                full_input_folder=None,
+                subfolder=subfolder,
+                batch_number=batch_number,
+                counter=c,
+                file_ext="tiff",
+                save_to_input_folder=False,
+                save_kwargs={
+                    "compression": "none",
+                    "dpi": (define.screen_dpi, define.screen_dpi),
+                },
             )
 
             preview_results.append(ImageSaveHelperExt.get_save_result_temp(image, mask))
@@ -1322,10 +1507,12 @@ class SaveImageTIFF(io.ComfyNode):
 
         return io.NodeOutput(ui=ui.SavedImages(preview_results))
 
+
 class SaveImageAdvancedTIFF(io.ComfyNode):
     """
     Saves images to disk as TIFF files with additional options.
     """
+
     output_dir = folder_paths.get_output_directory()
     prefix_append = ""
 
@@ -1342,37 +1529,37 @@ class SaveImageAdvancedTIFF(io.ComfyNode):
                 io.Image.Input(
                     id="images",
                     display_name="Images",
-                    tooltip="The images to be saved."
+                    tooltip="The images to be saved.",
                 ),
                 io.Mask.Input(
                     id="masks",
                     display_name="Alpha Masks",
                     tooltip="Optional alpha channel masks to clip the saved images. If provided, these masks will be applied to the corresponding images before saving.",
-                    optional=True
+                    optional=True,
                 ),
                 io.Boolean.Input(
                     id="disable_metadata",
                     display_name="Disable Metadata",
                     tooltip="Disable embedding EXIF data into the saved images.\nEmbed into `UserComment`.",
-                    default=False
+                    default=False,
                 ),
                 io.Boolean.Input(
                     id="join_alpha",
                     display_name="Join Alpha Channel",
                     tooltip="Clip the image with the provided mask.\nPlease note this does not work on JPG format.",
-                    default=False
+                    default=False,
                 ),
                 io.Boolean.Input(
                     id="invert_alpha",
                     display_name="Invert Alpha",
                     tooltip="Whether to invert the alpha channel before saving.",
-                    default=False
+                    default=False,
                 ),
                 io.String.Input(
                     id="filename_prefix",
                     display_name="Filename Prefix",
                     tooltip="The prefix to use for the filename.",
-                    default=define.default_file_name
+                    default=define.default_file_name,
                 ),
                 io.Int.Input(
                     id="dpi",
@@ -1381,28 +1568,38 @@ class SaveImageAdvancedTIFF(io.ComfyNode):
                     default=define.printing_dpi,
                     min=1,
                     max=600,
-                    display_mode=io.NumberDisplay.slider
+                    display_mode=io.NumberDisplay.slider,
                 ),
                 io.Combo.Input(
                     id="tiff_compression",
                     display_name="Compression",
                     tooltip="The compression to use when saving images as TIFF.",
-                    options=["none", "tiff_lzw", "tiff_deflate", "tiff_adobe_deflate", "packbits", "jpeg", "tiff_jpeg", "tiff_ccitt"],
-                    default="none"
+                    options=[
+                        "none",
+                        "tiff_lzw",
+                        "tiff_deflate",
+                        "tiff_adobe_deflate",
+                        "packbits",
+                        "jpeg",
+                        "tiff_jpeg",
+                        "tiff_ccitt",
+                    ],
+                    default="none",
                 ),
                 io.Boolean.Input(
                     id="save_to_input_folder",
                     display_name="Save to Input Folder",
                     tooltip="Whether to sync the image to the input folder.",
-                    default=False
+                    default=False,
                 ),
             ],
             hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
             is_output_node=True,
         )
-    
+
     @classmethod
-    def execute(cls,
+    def execute(
+        cls,
         images: torch.Tensor,
         masks: torch.Tensor | None = None,
         filename_prefix: str = define.default_file_name,
@@ -1412,13 +1609,17 @@ class SaveImageAdvancedTIFF(io.ComfyNode):
         tiff_compression: str = "none",
         dpi: int = define.printing_dpi,
         save_to_input_folder: bool = False,
-        **kwargs
+        **kwargs,
     ) -> io.NodeOutput:
-        f_output_folder, filename, c, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0])
+        f_output_folder, filename, c, subfolder, filename_prefix = (
+            folder_paths.get_save_image_path(
+                filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0]
+            )
+        )
         f_input_folder = os.path.join(folder_paths.get_input_directory(), subfolder)
 
         preview_results = []
-        for (batch_number, image) in enumerate(images):
+        for batch_number, image in enumerate(images):
             mode = "RGBA"
             save_options = {
                 "compression": tiff_compression,
@@ -1431,9 +1632,11 @@ class SaveImageAdvancedTIFF(io.ComfyNode):
                     save_options["tiffinfo"] = tiffinfo
 
             if tiff_compression == "tiff_ccitt":
-                print(f"{cls.debug_header} tiff_ccitt compression requires a bilevel (1-bit) image.")
+                logger.warning(
+                    f"{cls.debug_header} tiff_ccitt compression requires a bilevel (1-bit) image."
+                )
                 mode = "1"
-                
+
             mask = None
             if join_alpha:
                 mask_index = min(batch_number, masks.shape[0] - 1)
@@ -1442,11 +1645,19 @@ class SaveImageAdvancedTIFF(io.ComfyNode):
                     mask = 1.0 - mask
 
             ImageSaveHelperExt.get_save_result(
-                image=image, mask=mask, convert_mode=mode, join_mask=join_alpha, filename=filename,
-                full_output_folder=f_output_folder, full_input_folder=f_input_folder, subfolder=subfolder,
-                batch_number=batch_number, counter=c,
-                file_ext="tiff", save_to_input_folder=save_to_input_folder,
-                save_kwargs=save_options
+                image=image,
+                mask=mask,
+                convert_mode=mode,
+                join_mask=join_alpha,
+                filename=filename,
+                full_output_folder=f_output_folder,
+                full_input_folder=f_input_folder,
+                subfolder=subfolder,
+                batch_number=batch_number,
+                counter=c,
+                file_ext="tiff",
+                save_to_input_folder=save_to_input_folder,
+                save_kwargs=save_options,
             )
 
             preview_results.append(ImageSaveHelperExt.get_save_result_temp(image, mask))
@@ -1460,6 +1671,7 @@ class SaveImageTGA(io.ComfyNode):
     """
     Saves images to disk as TGA files.
     """
+
     output_dir = folder_paths.get_output_directory()
     prefix_append = ""
 
@@ -1476,13 +1688,13 @@ class SaveImageTGA(io.ComfyNode):
                 io.Image.Input(
                     id="images",
                     display_name="Images",
-                    tooltip="The images to be saved."
+                    tooltip="The images to be saved.",
                 ),
                 io.String.Input(
                     id="filename_prefix",
                     display_name="Filename Prefix",
                     tooltip="Prefix for the saved image filenames.\nEach image will be saved as {prefix}_{index}.{format}.",
-                    default=define.default_file_name
+                    default=define.default_file_name,
                 ),
             ],
             hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
@@ -1494,17 +1706,30 @@ class SaveImageTGA(io.ComfyNode):
         cls,
         images: torch.Tensor,
         filename_prefix: str = define.default_file_name,
-        **kwargs
+        **kwargs,
     ) -> io.NodeOutput:
-        f_output_folder, filename, c, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0])
-        
+        f_output_folder, filename, c, subfolder, filename_prefix = (
+            folder_paths.get_save_image_path(
+                filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0]
+            )
+        )
+
         preview_results = []
-        for (batch_number, image) in enumerate(images):
+        for batch_number, image in enumerate(images):
             ImageSaveHelperExt.get_save_result(
-                image=image, mask=None, convert_mode="RGB", join_mask=False, filename=filename,
-                full_output_folder=f_output_folder, full_input_folder=None, subfolder=subfolder,
-                batch_number=batch_number, counter=c, file_ext="tga", save_to_input_folder=False,
-                save_kwargs={"compression": "tga_rle"}
+                image=image,
+                mask=None,
+                convert_mode="RGB",
+                join_mask=False,
+                filename=filename,
+                full_output_folder=f_output_folder,
+                full_input_folder=None,
+                subfolder=subfolder,
+                batch_number=batch_number,
+                counter=c,
+                file_ext="tga",
+                save_to_input_folder=False,
+                save_kwargs={"compression": "tga_rle"},
             )
 
             preview_results.append(ImageSaveHelperExt.get_save_result_temp(image))
@@ -1513,10 +1738,12 @@ class SaveImageTGA(io.ComfyNode):
 
         return io.NodeOutput(ui=ui.SavedImages(preview_results))
 
+
 class SaveImageAdvancedTGA(io.ComfyNode):
     """
     Saves images to disk as TGA files with additional options.
     """
+
     output_dir = folder_paths.get_output_directory()
     prefix_append = ""
 
@@ -1533,51 +1760,52 @@ class SaveImageAdvancedTGA(io.ComfyNode):
                 io.Image.Input(
                     id="images",
                     display_name="Images",
-                    tooltip="The images to be saved."
+                    tooltip="The images to be saved.",
                 ),
                 io.Mask.Input(
                     id="masks",
                     display_name="Alpha Masks",
                     tooltip="Optional alpha channel masks to clip the saved images. If provided, these masks will be applied to the corresponding images before saving.",
-                    optional=True
+                    optional=True,
                 ),
                 io.Boolean.Input(
                     id="rle",
                     display_name="RLE Compression",
                     tooltip="Whether to use RLE compression when saving as TGA.",
-                    default=True
+                    default=True,
                 ),
                 io.Boolean.Input(
                     id="join_alpha",
                     display_name="Join Alpha Channel",
                     tooltip="Clip the image with the provided mask.",
-                    default=False
+                    default=False,
                 ),
                 io.Boolean.Input(
                     id="invert_alpha",
                     display_name="Invert Alpha",
                     tooltip="Whether to invert the alpha channel before saving.",
-                    default=False
+                    default=False,
                 ),
                 io.String.Input(
                     id="filename_prefix",
                     display_name="Filename Prefix",
                     tooltip="The prefix to use for the filename.",
-                    default=define.default_file_name
+                    default=define.default_file_name,
                 ),
                 io.Boolean.Input(
                     id="save_to_input_folder",
                     display_name="Save to Input Folder",
                     tooltip="Whether to sync the image to the input folder.",
-                    default=False
+                    default=False,
                 ),
             ],
             hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
             is_output_node=True,
         )
-    
+
     @classmethod
-    def execute(cls,
+    def execute(
+        cls,
         images: torch.Tensor,
         masks: torch.Tensor | None = None,
         filename_prefix: str = define.default_file_name,
@@ -1585,18 +1813,22 @@ class SaveImageAdvancedTGA(io.ComfyNode):
         join_alpha: bool = False,
         invert_alpha: bool = False,
         save_to_input_folder: bool = False,
-        **kwargs
+        **kwargs,
     ) -> io.NodeOutput:
-        f_output_folder, filename, c, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0])
+        f_output_folder, filename, c, subfolder, filename_prefix = (
+            folder_paths.get_save_image_path(
+                filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0]
+            )
+        )
         f_input_folder = os.path.join(folder_paths.get_input_directory(), subfolder)
 
         preview_results = []
-        for (batch_number, image) in enumerate(images):
+        for batch_number, image in enumerate(images):
             mode = "RGBA" if join_alpha else "RGB"
             save_options = {
                 "compression": "tga_rle" if rle else None,
             }
-                
+
             mask = None
             if join_alpha and masks is not None:
                 mask_index = min(batch_number, masks.shape[0] - 1)
@@ -1605,11 +1837,19 @@ class SaveImageAdvancedTGA(io.ComfyNode):
                     mask = 1.0 - mask
 
             ImageSaveHelperExt.get_save_result(
-                image=image, mask=mask, convert_mode=mode, join_mask=join_alpha, filename=filename,
-                full_output_folder=f_output_folder, full_input_folder=f_input_folder, subfolder=subfolder,
-                batch_number=batch_number, counter=c,
-                file_ext="tga", save_to_input_folder=save_to_input_folder,
-                save_kwargs=save_options
+                image=image,
+                mask=mask,
+                convert_mode=mode,
+                join_mask=join_alpha,
+                filename=filename,
+                full_output_folder=f_output_folder,
+                full_input_folder=f_input_folder,
+                subfolder=subfolder,
+                batch_number=batch_number,
+                counter=c,
+                file_ext="tga",
+                save_to_input_folder=save_to_input_folder,
+                save_kwargs=save_options,
             )
 
             preview_results.append(ImageSaveHelperExt.get_save_result_temp(image, mask))
@@ -1617,6 +1857,226 @@ class SaveImageAdvancedTGA(io.ComfyNode):
             c += 1
 
         return io.NodeOutput(ui=ui.SavedImages(preview_results))
+
+
+class SaveImageAVIF(io.ComfyNode):
+    """
+    Saves images to disk as AVIF files.
+    """
+
+    output_dir = folder_paths.get_output_directory()
+    prefix_append = ""
+
+    debug_header = "[ComfyUI-SaveImageAVIF]"
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="SaveImageAVIF",
+            display_name="Save Image (AVIF)",
+            category=define.author,
+            description="Saves images to disk as AVIF files.",
+            inputs=[
+                io.Image.Input(
+                    id="images",
+                    display_name="Images",
+                    tooltip="The images to be saved.",
+                ),
+                io.String.Input(
+                    id="filename_prefix",
+                    display_name="Filename Prefix",
+                    tooltip="Prefix for the saved image filenames.\nEach image will be saved as {prefix}_{index}.{format}.",
+                    default=define.default_file_name,
+                ),
+            ],
+            hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
+            is_output_node=True,
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        images: torch.Tensor,
+        filename_prefix: str = define.default_file_name,
+        **kwargs,
+    ) -> io.NodeOutput:
+        f_output_folder, filename, c, subfolder, filename_prefix = (
+            folder_paths.get_save_image_path(
+                filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0]
+            )
+        )
+
+        results = []
+        for batch_number, image in enumerate(images):
+            result = ImageSaveHelperExt.get_save_result(
+                image=image,
+                mask=None,
+                convert_mode="RGB",
+                join_mask=False,
+                filename=filename,
+                full_output_folder=f_output_folder,
+                full_input_folder=None,
+                subfolder=subfolder,
+                batch_number=batch_number,
+                counter=c,
+                file_ext="avif",
+                save_to_input_folder=False,
+                save_kwargs={
+                    "quality": 85,
+                    "speed": 6,
+                    "dpi": (define.screen_dpi, define.screen_dpi),
+                },
+            )
+
+            results.append(result)
+            c += 1
+
+        return io.NodeOutput(ui=ui.SavedImages(results))
+
+
+class SaveImageAdvancedAVIF(io.ComfyNode):
+    """
+    Saves images to disk as AVIF files with additional options.
+    """
+
+    output_dir = folder_paths.get_output_directory()
+    prefix_append = ""
+
+    debug_header = "[ComfyUI-SaveImageAdvancedAVIF]"
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="SaveImageAdvancedAVIF",
+            display_name="Save Image Advanced (AVIF)",
+            category=define.author,
+            description="Saves images to disk as AVIF files.",
+            inputs=[
+                io.Image.Input(
+                    id="images",
+                    display_name="Images",
+                    tooltip="The images to be saved.",
+                ),
+                io.Mask.Input(
+                    id="masks",
+                    display_name="Alpha Masks",
+                    tooltip="Optional alpha channel masks to clip the saved images. If provided, these masks will be applied to the corresponding images before saving.",
+                    optional=True,
+                ),
+                io.Boolean.Input(
+                    id="join_alpha",
+                    display_name="Join Alpha Channel",
+                    tooltip="Clip the image with the provided mask.",
+                    default=False,
+                ),
+                io.Boolean.Input(
+                    id="invert_alpha",
+                    display_name="Invert Alpha",
+                    tooltip="Whether to invert the alpha channel before saving.",
+                    default=False,
+                ),
+                io.String.Input(
+                    id="filename_prefix",
+                    display_name="Filename Prefix",
+                    tooltip="The prefix to use for the filename.",
+                    default=define.default_file_name,
+                ),
+                io.Int.Input(
+                    id="dpi",
+                    display_name="DPI",
+                    tooltip="The DPI to use when saving images.",
+                    default=define.printing_dpi,
+                    min=1,
+                    max=600,
+                    display_mode=io.NumberDisplay.slider,
+                ),
+                io.Int.Input(
+                    id="quality",
+                    display_name="Quality",
+                    tooltip="The quality of the saved images (0-100).",
+                    default=80,
+                    min=0,
+                    max=100,
+                    display_mode=io.NumberDisplay.slider,
+                ),
+                io.Int.Input(
+                    id="speed",
+                    display_name="Speed",
+                    tooltip="AVIF encoding speed (0-10). 0 is slowest/best, 10 is fastest.",
+                    default=6,
+                    min=0,
+                    max=10,
+                    display_mode=io.NumberDisplay.slider,
+                ),
+                io.Boolean.Input(
+                    id="save_to_input_folder",
+                    display_name="Save to Input Folder",
+                    tooltip="Whether to sync the image to the input folder.",
+                    default=False,
+                ),
+            ],
+            hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
+            is_output_node=True,
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        images: torch.Tensor,
+        masks: torch.Tensor | None = None,
+        filename_prefix: str = define.default_file_name,
+        join_alpha: bool = False,
+        invert_alpha: bool = False,
+        dpi: int = define.printing_dpi,
+        quality: int = 80,
+        speed: int = 6,
+        save_to_input_folder: bool = False,
+        **kwargs,
+    ) -> io.NodeOutput:
+        f_output_folder, filename, c, subfolder, filename_prefix = (
+            folder_paths.get_save_image_path(
+                filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0]
+            )
+        )
+        f_input_folder = os.path.join(folder_paths.get_input_directory(), subfolder)
+
+        results = []
+        for batch_number, image in enumerate(images):
+            mode = "RGBA" if join_alpha else "RGB"
+            save_options = {
+                "quality": quality,
+                "speed": speed,
+                "dpi": (dpi, dpi),
+            }
+
+            mask = None
+            if join_alpha and masks is not None:
+                mask_index = min(batch_number, masks.shape[0] - 1)
+                mask = masks[mask_index]
+                if invert_alpha:
+                    mask = 1.0 - mask
+
+            result = ImageSaveHelperExt.get_save_result(
+                image=image,
+                mask=mask,
+                convert_mode=mode,
+                join_mask=join_alpha,
+                filename=filename,
+                full_output_folder=f_output_folder,
+                full_input_folder=f_input_folder,
+                subfolder=subfolder,
+                batch_number=batch_number,
+                counter=c,
+                file_ext="avif",
+                save_to_input_folder=save_to_input_folder,
+                save_kwargs=save_options,
+            )
+
+            results.append(result)
+            c += 1
+
+        return io.NodeOutput(ui=ui.SavedImages(results))
+
 
 NODE_CLASS_MAPPINGS = {
     "ColorPatchFlatten": ColorPatchFlatten,
@@ -1631,7 +2091,9 @@ NODE_CLASS_MAPPINGS = {
     "SaveImageTIFF": SaveImageTIFF,
     "SaveImageAdvancedTIFF": SaveImageAdvancedTIFF,
     "SaveImageTGA": SaveImageTGA,
-    "SaveImageAdvancedTGA": SaveImageAdvancedTGA
+    "SaveImageAdvancedTGA": SaveImageAdvancedTGA,
+    "SaveImageAVIF": SaveImageAVIF,
+    "SaveImageAdvancedAVIF": SaveImageAdvancedAVIF,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -1648,4 +2110,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SaveImageAdvancedTIFF": "Save Image Advanced (TIFF)",
     "SaveImageTGA": "Save Image (TGA)",
     "SaveImageAdvancedTGA": "Save Image Advanced (TGA)",
+    "SaveImageAVIF": "Save Image (AVIF)",
+    "SaveImageAdvancedAVIF": "Save Image Advanced (AVIF)",
 }

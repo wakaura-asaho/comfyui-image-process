@@ -2,9 +2,9 @@ import { app } from "/scripts/app.js";
 
 const qualityWidgetsConfig = {
     "disable_metadata": ["png", "jpg", "webp", "tiff"],
-    "join_alpha": ["png", "webp", "tiff", "bmp", "tga"],
-    "invert_alpha": ["png", "webp", "tiff", "bmp", "tga"],
-    "quality": ["jpg", "webp"],
+    "join_alpha": ["png", "webp", "tiff", "bmp", "tga", "avif"],
+    "invert_alpha": ["png", "webp", "tiff", "bmp", "tga", "avif"],
+    "quality": ["jpg", "webp", "avif"],
     "compress_level": ["png"],
     "tiff_compression": ["tiff"],
     "tga_rle": ["tga"],
