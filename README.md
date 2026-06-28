@@ -43,8 +43,11 @@ Two new nodes for saving Windows icon files:
 
 An example workflow is included at [`workflows/example_workflow_imagesv_ico.json`](workflows/example_workflow_imagesv_ico.json).
 
-> [!WARNING] Renaming the class name of `Save Image (Advanced)`
-> Discovered in version 0.24.1, an official node with the same class name is introduced; to avoid the node from being confused upon fetching the schema, the internal class name has been renamed to `SaveImageAdvancedCustom`.
+> [!WARNING]
+> Renaming the class name of `Save Image (Advanced)`.
+> 
+> Discovered in version `0.24.1`, an official node with the same class name is introduced.
+> To prevent the node from being confused when fetching the schema, the internal class name has been renamed to `SaveImageAdvancedCustom`.
 
 ---
 
