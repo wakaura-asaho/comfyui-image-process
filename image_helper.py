@@ -6,12 +6,71 @@ import numpy as np
 import torch
 import folder_paths
 import os
+import re
 import piexif
 import json
 import time
 import random
+from datetime import datetime
 
-class ImageSaveHelperExt():
+
+class ImageSaveHelperExt:
+    @staticmethod
+    def resolve_filename_prefix(
+        prefix: str, image_width: int = 0, image_height: int = 0
+    ) -> str:
+        """
+        Resolve template tokens in a filename prefix string.
+        """
+        if "%" not in prefix:
+            return prefix
+
+        now = datetime.now()
+
+        def _replace_date(m: re.Match) -> str:
+            fmt = m.group(1)
+            # Replace longest tokens first to avoid partial matches (e.g. yy
+            # inside yyyy, or mm inside MM).
+            fmt = fmt.replace("yyyy", now.strftime("%Y"))
+            fmt = fmt.replace("yy", now.strftime("%y"))
+            fmt = fmt.replace("MM", now.strftime("%m"))
+            fmt = fmt.replace("dd", now.strftime("%d"))
+            fmt = fmt.replace("HH", now.strftime("%H"))
+            fmt = fmt.replace("hh", now.strftime("%I"))
+            fmt = fmt.replace("mm", now.strftime("%M"))
+            fmt = fmt.replace("ss", now.strftime("%S"))
+            return fmt
+
+        prefix = re.sub(r"%date:([^%]+)%", _replace_date, prefix)
+
+        prefix = prefix.replace("%year%", now.strftime("%Y"))
+        prefix = prefix.replace("%month%", now.strftime("%m"))
+        prefix = prefix.replace("%day%", now.strftime("%d"))
+        prefix = prefix.replace("%hour%", now.strftime("%H"))
+        prefix = prefix.replace("%minute%", now.strftime("%M"))
+        prefix = prefix.replace("%second%", now.strftime("%S"))
+        prefix = prefix.replace("%width%", str(image_width))
+        prefix = prefix.replace("%height%", str(image_height))
+
+        return prefix
+
+    @staticmethod
+    def get_save_image_path(
+        filename_prefix: str,
+        output_dir: str,
+        image_width: int = 0,
+        image_height: int = 0,
+    ) -> tuple[str, str, int, str, str]:
+        """
+        Drop-in replacement for `folder_paths.get_save_image_path`.
+        """
+        resolved = ImageSaveHelperExt.resolve_filename_prefix(
+            filename_prefix, image_width, image_height
+        )
+        return folder_paths.get_save_image_path(
+            resolved, output_dir, image_width, image_height
+        )
+
     @staticmethod
     def dump_extra_info(cls: type[io.ComfyNode] | None):
         if cls is None:
@@ -32,7 +91,9 @@ class ImageSaveHelperExt():
             info_dict = {"prompt": cls.hidden.prompt}
         if cls.hidden.extra_pnginfo:
             info_dict.update(ImageSaveHelperExt.dump_extra_info(cls))
-        exif_dict["Exif"][piexif.ExifIFD.UserComment] = json.dumps(info_dict).encode('utf-8')
+        exif_dict["Exif"][piexif.ExifIFD.UserComment] = json.dumps(info_dict).encode(
+            "utf-8"
+        )
         return piexif.dump(exif_dict)
 
     @staticmethod
@@ -52,6 +113,7 @@ class ImageSaveHelperExt():
         if cls is None:
             return None
         from PIL.TiffImagePlugin import ImageFileDirectory_v2
+
         tiffinfo = ImageFileDirectory_v2()
         info_dict = {}
         if cls.hidden.prompt:
@@ -76,7 +138,7 @@ class ImageSaveHelperExt():
         file_ext: str,
         save_to_input_folder: bool = False,
         save_kwargs: dict = {},
-        icc_profile: bytes | None = None
+        icc_profile: bytes | None = None,
     ) -> ui.SavedResult:
         i = 255 * image.cpu().numpy()
         img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
@@ -86,7 +148,7 @@ class ImageSaveHelperExt():
         if mask is not None:
             if convert_mode != "RGBA" or join_mask is False:
                 mask = None
-            else: 
+            else:
                 m = 255 * mask.cpu().numpy()
                 m_pil = Image.fromarray(m.astype(np.uint8), mode="L")
                 if m.shape != (img.height, img.width):
@@ -98,23 +160,36 @@ class ImageSaveHelperExt():
 
         if not os.path.exists(full_output_folder):
             os.makedirs(full_output_folder)
-        img.save(os.path.join(full_output_folder, file), icc_profile=icc_profile, **save_kwargs)
-        if (save_to_input_folder):
+        img.save(
+            os.path.join(full_output_folder, file),
+            icc_profile=icc_profile,
+            **save_kwargs,
+        )
+        if save_to_input_folder:
             if not os.path.exists(full_input_folder):
                 os.makedirs(full_input_folder)
             target_file = os.path.join(full_input_folder, file)
             if os.path.exists(target_file):
-                target_file = os.path.join(full_input_folder, f"{filename_with_batch_num}_{counter:05}_{int(time.time())}.jpg")
+                target_file = os.path.join(
+                    full_input_folder,
+                    f"{filename_with_batch_num}_{counter:05}_{int(time.time())}.jpg",
+                )
             img.save(target_file, icc_profile=icc_profile, **save_kwargs)
         return ui.SavedResult(file, subfolder, io.FolderType.output)
 
     @staticmethod
-    def get_save_result_temp(image: torch.Tensor, mask: torch.Tensor | None = None) -> ui.SavedResult:
-        tmp_file = "ComfyUI_temp_" + ''.join(random.choice("abcdefghijklmnopqrstupvxyz") for _ in range(5)) + ".png"
-        
+    def get_save_result_temp(
+        image: torch.Tensor, mask: torch.Tensor | None = None
+    ) -> ui.SavedResult:
+        tmp_file = (
+            "ComfyUI_temp_"
+            + "".join(random.choice("abcdefghijklmnopqrstupvxyz") for _ in range(5))
+            + ".png"
+        )
+
         i = 255 * image.cpu().numpy()
         img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8)).convert("RGBA")
-        
+
         if mask is not None:
             m = 255 * mask.cpu().numpy()
             m_pil = Image.fromarray(m.astype(np.uint8), mode="L")
@@ -126,7 +201,7 @@ class ImageSaveHelperExt():
         return ui.SavedResult(tmp_file, "", io.FolderType.temp)
 
     @staticmethod
-    def to_pillow_image(image: torch.Tensor , number: int = 0) -> PILImage:
+    def to_pillow_image(image: torch.Tensor, number: int = 0) -> PILImage:
         """
         Explicitly extract an image from the tensor batch.
         """
@@ -137,10 +212,10 @@ class ImageSaveHelperExt():
             if img_np.shape[0] > 0:
                 number = max(0, min(number, img_np.shape[0] - 1))
                 img_np = img_np[number]
-        
+
         if img_np.dtype in (np.float32, np.float64):
             img_np = np.clip(img_np * 255, 0, 255).astype(np.uint8)
- 
+
         if img_np.ndim == 3:
             if img_np.shape[2] == 4:
                 pil_image = Image.fromarray(img_np, mode="RGBA")
@@ -163,7 +238,7 @@ class ImageSaveHelperExt():
         if img_np.ndim == 3:
             img_np = img_np[None, ...]  # to (1, H, W, C)
         elif img_np.ndim == 2:
-            img_np = img_np[None, ..., None] # to (1, H, W, 1)
+            img_np = img_np[None, ..., None]  # to (1, H, W, 1)
 
         images = []
         if img_np.ndim == 4:

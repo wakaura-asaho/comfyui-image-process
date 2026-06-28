@@ -167,3 +167,98 @@ app.registerExtension({
         };
     }
 });
+
+app.registerExtension({
+    name: "Wakaura.FilenameTokenMenu",
+    async beforeRegisterNodeDef(nodeType) {
+        const origGetExtraMenuOptions = nodeType.prototype.getExtraMenuOptions;
+        nodeType.prototype.getExtraMenuOptions = function (_, options) {
+            const r = origGetExtraMenuOptions?.apply(this, arguments);
+
+            const widget = this.widgets?.find(w => w.name === "filename_prefix");
+            if (!widget) return r;
+
+            const node = this;
+            const append = (token) => {
+                widget.value = (widget.value ?? "") + token;
+                node.setDirtyCanvas(true, true);
+            };
+
+            options.push({
+                content: "Insert Filename Token",
+                has_submenu: true,
+                submenu: {
+                    options: [
+                        {
+                            content: "date",
+                            has_submenu: true,
+                            submenu: {
+                                options: [
+                                    {
+                                        content: "Full date: %date:yyyy-MM-dd%",
+                                        callback: () => append("%date:yyyy-MM-dd%"),
+                                    },
+                                    {
+                                        content: "Full datetime: %date:yyyy-MM-dd_HH-mm-ss%",
+                                        callback: () => append("%date:yyyy-MM-dd_HH-mm-ss%"),
+                                    },
+                                    null,
+                                    {
+                                        content: "Year: %year%",
+                                        callback: () => append("%year%"),
+                                    },
+                                    {
+                                        content: "Month: %month%",
+                                        callback: () => append("%month%"),
+                                    },
+                                    {
+                                        content: "Day: %day%",
+                                        callback: () => append("%day%"),
+                                    },
+                                ],
+                            },
+                        },
+                        {
+                            content: "time",
+                            has_submenu: true,
+                            submenu: {
+                                options: [
+                                    {
+                                        content: "Hour: %hour%",
+                                        callback: () => append("%hour%"),
+                                    },
+                                    {
+                                        content: "Minute: %minute%",
+                                        callback: () => append("%minute%"),
+                                    },
+                                    {
+                                        content: "Second: %second%",
+                                        callback: () => append("%second%"),
+                                    },
+                                ],
+                            },
+                        },
+                        {
+                            content: "image",
+                            has_submenu: true,
+                            submenu: {
+                                options: [
+                                    {
+                                        content: "Width: %width%",
+                                        callback: () => append("%width%"),
+                                    },
+                                    {
+                                        content: "Height: %height%",
+                                        callback: () => append("%height%"),
+                                    },
+                                ],
+                            },
+                        },
+                    ],
+                },
+            });
+
+            return r;
+        };
+    },
+});

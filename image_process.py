@@ -1,6 +1,7 @@
 from comfy_api.latest import io, ui
 import numpy as np
 import logging
+import time
 import scipy.ndimage as nd
 from PIL import Image, ImageCms
 from skimage.color import rgb2lab, rgb2hsv, hsv2rgb
@@ -766,7 +767,7 @@ class LoadICCProfile(io.ComfyNode):
         return io.NodeOutput(icc_data, cls.get_icc_profile_info_plain_text(icc_info))
 
 
-class SaveImageAdvanced(io.ComfyNode):
+class SaveImageAdvancedCustom(io.ComfyNode):
     """
     Saves images to disk with additional options for metadata and compression.
     """
@@ -783,7 +784,7 @@ class SaveImageAdvanced(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id="SaveImageAdvanced",
+            node_id="SaveImageAdvancedCustom",
             display_name="Save Image Advanced",
             category=define.author,
             description="Saves image to disk with additional options for metadata and compression.",
@@ -882,7 +883,7 @@ class SaveImageAdvanced(io.ComfyNode):
                 io.String.Input(
                     id="filename_prefix",
                     display_name="Filename Prefix",
-                    tooltip="Prefix for the saved image filenames.\nEach image will be saved as {prefix}_{index}.{format}.",
+                    tooltip="The prefix for the file to save. This may include formatting information such as %date:yyyy-MM-dd% or %Empty Latent Image.width% to include values from nodes.",
                     default=define.default_file_name,
                 ),
                 io.Boolean.Input(
@@ -916,7 +917,7 @@ class SaveImageAdvanced(io.ComfyNode):
         **kwargs,
     ) -> io.NodeOutput:
         f_output_folder, filename, c, subfolder, filename_prefix = (
-            folder_paths.get_save_image_path(
+            ImageSaveHelperExt.get_save_image_path(
                 filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0]
             )
         )
@@ -1052,7 +1053,7 @@ class SaveImageJPG(io.ComfyNode):
                 io.String.Input(
                     id="filename_prefix",
                     display_name="Filename Prefix",
-                    tooltip="Prefix for the saved image filenames.\nEach image will be saved as {prefix}_{index}.{format}.",
+                    tooltip="The prefix for the file to save. This may include formatting information such as %date:yyyy-MM-dd% or %Empty Latent Image.width% to include values from nodes.",
                     default=define.default_file_name,
                 ),
             ],
@@ -1068,7 +1069,7 @@ class SaveImageJPG(io.ComfyNode):
         **kwargs,
     ) -> io.NodeOutput:
         f_output_folder, filename, c, subfolder, filename_prefix = (
-            folder_paths.get_save_image_path(
+            ImageSaveHelperExt.get_save_image_path(
                 filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0]
             )
         )
@@ -1132,7 +1133,7 @@ class SaveImageAdvancedJPG(io.ComfyNode):
                 io.String.Input(
                     id="filename_prefix",
                     display_name="Filename Prefix",
-                    tooltip="The prefix to use for the filename.",
+                    tooltip="The prefix for the file to save. This may include formatting information such as %date:yyyy-MM-dd% or %Empty Latent Image.width% to include values from nodes.",
                     default=define.default_file_name,
                 ),
                 io.Int.Input(
@@ -1176,7 +1177,7 @@ class SaveImageAdvancedJPG(io.ComfyNode):
         **kwargs,
     ) -> io.NodeOutput:
         f_output_folder, filename, c, subfolder, filename_prefix = (
-            folder_paths.get_save_image_path(
+            ImageSaveHelperExt.get_save_image_path(
                 filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0]
             )
         )
@@ -1243,7 +1244,7 @@ class SaveImageBMP(io.ComfyNode):
                 io.String.Input(
                     id="filename_prefix",
                     display_name="Filename Prefix",
-                    tooltip="Prefix for the saved image filenames.\nEach image will be saved as {prefix}_{index}.{format}.",
+                    tooltip="The prefix for the file to save. This may include formatting information such as %date:yyyy-MM-dd% or %Empty Latent Image.width% to include values from nodes.",
                     default=define.default_file_name,
                 ),
             ],
@@ -1259,7 +1260,7 @@ class SaveImageBMP(io.ComfyNode):
         **kwargs,
     ) -> io.NodeOutput:
         f_output_folder, filename, c, subfolder, filename_prefix = (
-            folder_paths.get_save_image_path(
+            ImageSaveHelperExt.get_save_image_path(
                 filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0]
             )
         )
@@ -1338,7 +1339,7 @@ class SaveImageAdvancedBMP(io.ComfyNode):
                 io.String.Input(
                     id="filename_prefix",
                     display_name="Filename Prefix",
-                    tooltip="The prefix to use for the filename.",
+                    tooltip="The prefix for the file to save. This may include formatting information such as %date:yyyy-MM-dd% or %Empty Latent Image.width% to include values from nodes.",
                     default=define.default_file_name,
                 ),
                 io.Int.Input(
@@ -1375,7 +1376,7 @@ class SaveImageAdvancedBMP(io.ComfyNode):
         **kwargs,
     ) -> io.NodeOutput:
         f_output_folder, filename, c, subfolder, filename_prefix = (
-            folder_paths.get_save_image_path(
+            ImageSaveHelperExt.get_save_image_path(
                 filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0]
             )
         )
@@ -1449,7 +1450,7 @@ class SaveImageTIFF(io.ComfyNode):
                 io.String.Input(
                     id="filename_prefix",
                     display_name="Filename Prefix",
-                    tooltip="Prefix for the saved image filenames.\nEach image will be saved as {prefix}_{index}.{format}.",
+                    tooltip="The prefix for the file to save. This may include formatting information such as %date:yyyy-MM-dd% or %Empty Latent Image.width% to include values from nodes.",
                     default=define.default_file_name,
                 ),
             ],
@@ -1466,7 +1467,7 @@ class SaveImageTIFF(io.ComfyNode):
         **kwargs,
     ) -> io.NodeOutput:
         f_output_folder, filename, c, subfolder, filename_prefix = (
-            folder_paths.get_save_image_path(
+            ImageSaveHelperExt.get_save_image_path(
                 filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0]
             )
         )
@@ -1558,7 +1559,7 @@ class SaveImageAdvancedTIFF(io.ComfyNode):
                 io.String.Input(
                     id="filename_prefix",
                     display_name="Filename Prefix",
-                    tooltip="The prefix to use for the filename.",
+                    tooltip="The prefix for the file to save. This may include formatting information such as %date:yyyy-MM-dd% or %Empty Latent Image.width% to include values from nodes.",
                     default=define.default_file_name,
                 ),
                 io.Int.Input(
@@ -1612,7 +1613,7 @@ class SaveImageAdvancedTIFF(io.ComfyNode):
         **kwargs,
     ) -> io.NodeOutput:
         f_output_folder, filename, c, subfolder, filename_prefix = (
-            folder_paths.get_save_image_path(
+            ImageSaveHelperExt.get_save_image_path(
                 filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0]
             )
         )
@@ -1693,7 +1694,7 @@ class SaveImageTGA(io.ComfyNode):
                 io.String.Input(
                     id="filename_prefix",
                     display_name="Filename Prefix",
-                    tooltip="Prefix for the saved image filenames.\nEach image will be saved as {prefix}_{index}.{format}.",
+                    tooltip="The prefix for the file to save. This may include formatting information such as %date:yyyy-MM-dd% or %Empty Latent Image.width% to include values from nodes.",
                     default=define.default_file_name,
                 ),
             ],
@@ -1709,7 +1710,7 @@ class SaveImageTGA(io.ComfyNode):
         **kwargs,
     ) -> io.NodeOutput:
         f_output_folder, filename, c, subfolder, filename_prefix = (
-            folder_paths.get_save_image_path(
+            ImageSaveHelperExt.get_save_image_path(
                 filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0]
             )
         )
@@ -1789,7 +1790,7 @@ class SaveImageAdvancedTGA(io.ComfyNode):
                 io.String.Input(
                     id="filename_prefix",
                     display_name="Filename Prefix",
-                    tooltip="The prefix to use for the filename.",
+                    tooltip="The prefix for the file to save. This may include formatting information such as %date:yyyy-MM-dd% or %Empty Latent Image.width% to include values from nodes.",
                     default=define.default_file_name,
                 ),
                 io.Boolean.Input(
@@ -1816,7 +1817,7 @@ class SaveImageAdvancedTGA(io.ComfyNode):
         **kwargs,
     ) -> io.NodeOutput:
         f_output_folder, filename, c, subfolder, filename_prefix = (
-            folder_paths.get_save_image_path(
+            ImageSaveHelperExt.get_save_image_path(
                 filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0]
             )
         )
@@ -1885,7 +1886,7 @@ class SaveImageAVIF(io.ComfyNode):
                 io.String.Input(
                     id="filename_prefix",
                     display_name="Filename Prefix",
-                    tooltip="Prefix for the saved image filenames.\nEach image will be saved as {prefix}_{index}.{format}.",
+                    tooltip="The prefix for the file to save. This may include formatting information such as %date:yyyy-MM-dd% or %Empty Latent Image.width% to include values from nodes.",
                     default=define.default_file_name,
                 ),
             ],
@@ -1901,7 +1902,7 @@ class SaveImageAVIF(io.ComfyNode):
         **kwargs,
     ) -> io.NodeOutput:
         f_output_folder, filename, c, subfolder, filename_prefix = (
-            folder_paths.get_save_image_path(
+            ImageSaveHelperExt.get_save_image_path(
                 filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0]
             )
         )
@@ -1978,7 +1979,7 @@ class SaveImageAdvancedAVIF(io.ComfyNode):
                 io.String.Input(
                     id="filename_prefix",
                     display_name="Filename Prefix",
-                    tooltip="The prefix to use for the filename.",
+                    tooltip="The prefix for the file to save. This may include formatting information such as %date:yyyy-MM-dd% or %Empty Latent Image.width% to include values from nodes.",
                     default=define.default_file_name,
                 ),
                 io.Int.Input(
@@ -2034,7 +2035,7 @@ class SaveImageAdvancedAVIF(io.ComfyNode):
         **kwargs,
     ) -> io.NodeOutput:
         f_output_folder, filename, c, subfolder, filename_prefix = (
-            folder_paths.get_save_image_path(
+            ImageSaveHelperExt.get_save_image_path(
                 filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0]
             )
         )
@@ -2078,12 +2079,439 @@ class SaveImageAdvancedAVIF(io.ComfyNode):
         return io.NodeOutput(ui=ui.SavedImages(results))
 
 
+class SaveImageICO(io.ComfyNode):
+    """
+    Save multiple images to disk as a bundled ICO file.
+    """
+
+    output_dir = folder_paths.get_output_directory()
+    prefix_append = ""
+
+    debug_header = "[ComfyUI-SaveImageICO]"
+
+    valid_ico_sizes = {16, 24, 32, 48, 64, 128, 256}
+    max_images = 256
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="SaveImageICO",
+            display_name="Save Image (ICO)",
+            category=define.author,
+            description="Save the image batch to disk as a single bundled ICO file.\nImages must be square and one of the standard ICO sizes\n(16, 24, 32, 48, 64, 128, 256).\nInvalid images are optionally saved as fallback PNGs.",
+            inputs=[
+                io.Image.Input(
+                    id="images",
+                    display_name="Images",
+                    tooltip="The images to be bundled into a single ICO file.\nEach image must be square and match a valid ICO size\n(16, 24, 32, 48, 64, 128, or 256 px).",
+                ),
+                io.String.Input(
+                    id="filename_prefix",
+                    display_name="Filename Prefix",
+                    tooltip="The prefix for the file to save. This may include formatting information such as %date:yyyy-MM-dd% or %Empty Latent Image.width% to include values from nodes.",
+                    default=define.default_file_name,
+                ),
+                io.Boolean.Input(
+                    id="save_invalid_as_png",
+                    display_name="Save Invalid as PNG",
+                    tooltip="When enabled, images that fail ICO validation are saved as\nindividual PNG files with an `_INVALID` suffix.\nWhen disabled, invalid images are silently discarded.",
+                    default=True,
+                ),
+            ],
+            hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
+            is_output_node=True,
+        )
+
+    @classmethod
+    def is_valid_ico_frame(cls, img: Image.Image) -> bool:
+        return img.width == img.height and img.width in cls.valid_ico_sizes
+
+    @classmethod
+    def execute(
+        cls,
+        images: torch.Tensor,
+        filename_prefix: str = define.default_file_name,
+        save_invalid_as_png: bool = True,
+        **kwargs,
+    ) -> io.NodeOutput:
+        batch_size = images.shape[0]
+        if batch_size > cls.max_images:
+            raise ValueError(
+                f"{cls.debug_header} Batch size {batch_size} exceeds the ICO limit of {cls.max_images} frames."
+            )
+
+        f_output_folder, filename, c, subfolder, filename_prefix = (
+            ImageSaveHelperExt.get_save_image_path(
+                filename_prefix, cls.output_dir, images[0].shape[1], images[0].shape[0]
+            )
+        )
+        if not os.path.exists(f_output_folder):
+            os.makedirs(f_output_folder)
+
+        pil_images = ImageSaveHelperExt.to_pillow_images(images)
+
+        valid_frames: list[Image.Image] = []
+        invalid_frames: list[tuple[int, Image.Image]] = []
+        for idx, img in enumerate(pil_images):
+            img = img.convert("RGBA")
+            if cls.is_valid_ico_frame(img):
+                valid_frames.append(img)
+            else:
+                invalid_frames.append((idx, img))
+
+        results = []
+
+        if valid_frames:
+            ico_file = f"{filename}_{c:05}_.ico"
+            ico_path = os.path.join(f_output_folder, ico_file)
+            valid_frames[0].save(
+                ico_path,
+                format="ICO",
+                append_images=valid_frames[1:],
+                sizes=[(img.width, img.height) for img in valid_frames],
+            )
+            results.append(ui.SavedResult(ico_file, subfolder, io.FolderType.output))
+            c += 1
+
+        if invalid_frames:
+            if save_invalid_as_png:
+                for idx, img in invalid_frames:
+                    png_file = f"{filename}_{c:05}_INVALID.png"
+                    img.save(os.path.join(f_output_folder, png_file))
+                    results.append(
+                        ui.SavedResult(png_file, subfolder, io.FolderType.output)
+                    )
+                    c += 1
+            else:
+                logger.warning(
+                    f"{cls.debug_header} {len(invalid_frames)} image(s) failed ICO validation and were discarded "
+                    f"(indices: {[i for i, _ in invalid_frames]}). "
+                    f"Valid ICO frames must be square and one of: {sorted(cls.valid_ico_sizes)} px."
+                )
+
+        return io.NodeOutput(ui=ui.SavedImages(results))
+
+
+class SaveImageAdvancedICO(io.ComfyNode):
+    """
+    Save multiple images to disk as a bundled ICO file with explicit size choices.
+    """
+
+    output_dir = folder_paths.get_output_directory()
+    prefix_append = ""
+
+    debug_header = "[ComfyUI-SaveImageICO]"
+
+    max_images = 256
+
+    valid_ico_sizes = {16, 24, 32, 48, 64, 128, 256}
+    _SIZE_SLOTS = [16, 24, 32, 48, 64, 128, 256]
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="SaveImageAdvancedICO",
+            display_name="Save Image Advanced (ICO)",
+            category=define.author,
+            description="Save the image batch to disk as a single bundled ICO file.\nImages must be square and one of the standard ICO sizes\n(16, 24, 32, 48, 64, 128, 256).\nInvalid images are optionally saved as fallback PNGs.",
+            inputs=[
+                io.Image.Input(
+                    id="images_16",
+                    display_name="Images (16)",
+                    tooltip="The images to be bundled into a single ICO file.\nThe input image must be 16x16 for this slot.",
+                    optional=True,
+                ),
+                io.Mask.Input(
+                    id="masks_16",
+                    display_name="Alpha Masks (16)",
+                    tooltip="Optional alpha channel masks to clip the saved images.\nIf provided, these masks will be applied to the corresponding images before saving.",
+                    optional=True,
+                ),
+                io.Image.Input(
+                    id="images_24",
+                    display_name="Images (24)",
+                    tooltip="The images to be bundled into a single ICO file.\nThe input image must be 24x24 for this slot.",
+                    optional=True,
+                ),
+                io.Mask.Input(
+                    id="masks_24",
+                    display_name="Alpha Masks (24)",
+                    tooltip="Optional alpha channel masks to clip the saved images.\nIf provided, these masks will be applied to the corresponding images before saving.",
+                    optional=True,
+                ),
+                io.Image.Input(
+                    id="images_32",
+                    display_name="Images (32)",
+                    tooltip="The images to be bundled into a single ICO file.\nThe input image must be 32x32 for this slot.",
+                    optional=True,
+                ),
+                io.Mask.Input(
+                    id="masks_32",
+                    display_name="Alpha Masks (32)",
+                    tooltip="Optional alpha channel masks to clip the saved images.\nIf provided, these masks will be applied to the corresponding images before saving.",
+                    optional=True,
+                ),
+                io.Image.Input(
+                    id="images_48",
+                    display_name="Images (48)",
+                    tooltip="The images to be bundled into a single ICO file.\nThe input image must be 48x48 for this slot.",
+                    optional=True,
+                ),
+                io.Mask.Input(
+                    id="masks_48",
+                    display_name="Alpha Masks (48)",
+                    tooltip="Optional alpha channel masks to clip the saved images.\nIf provided, these masks will be applied to the corresponding images before saving.",
+                    optional=True,
+                ),
+                io.Image.Input(
+                    id="images_64",
+                    display_name="Images (64)",
+                    tooltip="The images to be bundled into a single ICO file.\nThe input image must be 64x64 for this slot.",
+                    optional=True,
+                ),
+                io.Mask.Input(
+                    id="masks_64",
+                    display_name="Alpha Masks (64)",
+                    tooltip="Optional alpha channel masks to clip the saved images.\nIf provided, these masks will be applied to the corresponding images before saving.",
+                    optional=True,
+                ),
+                io.Image.Input(
+                    id="images_128",
+                    display_name="Images (128)",
+                    tooltip="The images to be bundled into a single ICO file.\nThe input image must be 128x128 for this slot.",
+                    optional=True,
+                ),
+                io.Mask.Input(
+                    id="masks_128",
+                    display_name="Alpha Masks (128)",
+                    tooltip="Optional alpha channel masks to clip the saved images.\nIf provided, these masks will be applied to the corresponding images before saving.",
+                    optional=True,
+                ),
+                io.Image.Input(
+                    id="images_256",
+                    display_name="Images (256)",
+                    tooltip="The images to be bundled into a single ICO file.\nThe input image must be 256x256 for this slot.",
+                    optional=True,
+                ),
+                io.Mask.Input(
+                    id="masks_256",
+                    display_name="Alpha Masks (256)",
+                    tooltip="Optional alpha channel masks to clip the saved images.\nIf provided, these masks will be applied to the corresponding images before saving.",
+                    optional=True,
+                ),
+                io.Combo.Input(
+                    id="color_depth",
+                    display_name="Color Depth",
+                    tooltip="The color depth of the images.",
+                    options=["8bit", "16bit", "32bit"],
+                    default="8bit",
+                ),
+                io.Combo.Input(
+                    id="compression",
+                    display_name="Compression",
+                    tooltip="The compression of the images.",
+                    options=["none", "RLE", "ZIP"],
+                    default="none",
+                ),
+                io.Boolean.Input(
+                    id="join_alpha",
+                    display_name="Join Alpha Channel",
+                    tooltip="Whether to join the alpha channel of the images.",
+                    default=False,
+                ),
+                io.Boolean.Input(
+                    id="invert_alpha",
+                    display_name="Invert Alpha",
+                    tooltip="Whether to invert the alpha channel of the images.",
+                    default=False,
+                ),
+                io.String.Input(
+                    id="filename_prefix",
+                    display_name="Filename Prefix",
+                    tooltip="The prefix for the file to save. This may include formatting information such as %date:yyyy-MM-dd% or %Empty Latent Image.width% to include values from nodes.",
+                    default=define.default_file_name,
+                ),
+                io.Boolean.Input(
+                    id="save_to_input_folder",
+                    display_name="Save to Input Folder",
+                    tooltip="Whether to sync the image to the input folder.",
+                    default=False,
+                ),
+                io.Boolean.Input(
+                    id="sort_by_size",
+                    display_name="Sort by Size",
+                    tooltip="When enabled, the images will be sorted by size before being bundled into the ICO file.",
+                    default=False,
+                ),
+                io.Boolean.Input(
+                    id="save_invalid_as_png",
+                    display_name="Save Invalid as PNG",
+                    tooltip="When enabled, images that fail ICO validation are saved as\nindividual PNG files with an `_INVALID` suffix.\nWhen disabled, invalid images are silently discarded.",
+                    default=True,
+                ),
+            ],
+            hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
+            is_output_node=True,
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        images_16: torch.Tensor | None = None,
+        images_24: torch.Tensor | None = None,
+        images_32: torch.Tensor | None = None,
+        images_48: torch.Tensor | None = None,
+        images_64: torch.Tensor | None = None,
+        images_128: torch.Tensor | None = None,
+        images_256: torch.Tensor | None = None,
+        masks_16: torch.Tensor | None = None,
+        masks_24: torch.Tensor | None = None,
+        masks_32: torch.Tensor | None = None,
+        masks_48: torch.Tensor | None = None,
+        masks_64: torch.Tensor | None = None,
+        masks_128: torch.Tensor | None = None,
+        masks_256: torch.Tensor | None = None,
+        color_depth: str = "8bit",
+        compression: str = "none",
+        join_alpha: bool = False,
+        invert_alpha: bool = False,
+        filename_prefix: str = define.default_file_name,
+        save_to_input_folder: bool = False,
+        sort_by_size: bool = False,
+        save_invalid_as_png: bool = True,
+        **kwargs,
+    ) -> io.NodeOutput:
+        input_tensors: dict[int, torch.Tensor] = {
+            size: tensor
+            for size, tensor in zip(cls._SIZE_SLOTS, [
+                images_16, images_24, images_32, images_48,
+                images_64, images_128, images_256,
+            ])
+            if tensor is not None
+        }
+        input_masks: dict[int, torch.Tensor] = {
+            size: mask
+            for size, mask in zip(cls._SIZE_SLOTS, [
+                masks_16, masks_24, masks_32, masks_48,
+                masks_64, masks_128, masks_256,
+            ])
+            if mask is not None
+        }
+
+        if not input_tensors:
+            raise ValueError(f"{cls.debug_header} No images provided to any size slot.")
+
+        ref_size = min(input_tensors)
+        ref_tensor = input_tensors[ref_size]
+        f_output_folder, filename, c, subfolder, filename_prefix = (
+            ImageSaveHelperExt.get_save_image_path(
+                filename_prefix, cls.output_dir,
+                ref_tensor.shape[2], ref_tensor.shape[1],
+            )
+        )
+        f_input_folder = os.path.join(folder_paths.get_input_directory(), subfolder)
+        os.makedirs(f_output_folder, exist_ok=True)
+
+        # Resolve target color mode.
+        # join_alpha / 32bit → RGBA; 16bit → RGB; 8bit → P (256-color palette).
+        if join_alpha or color_depth == "32bit":
+            target_mode = "RGBA"
+        elif color_depth == "8bit":
+            target_mode = "P"
+        else:
+            target_mode = "RGB"
+
+        valid_frames: list[tuple[int, Image.Image]] = []
+        invalid_frames: list[tuple[int, Image.Image]] = []
+
+        ordered_sizes = sorted(input_tensors) if sort_by_size else list(input_tensors)
+        for expected_size in ordered_sizes:
+            img = ImageSaveHelperExt.to_pillow_image(input_tensors[expected_size], 0)
+
+            img = img.convert("RGBA")
+
+            if join_alpha:
+                mask_tensor = input_masks.get(expected_size)
+                if mask_tensor is not None:
+                    m = mask_tensor[0] if mask_tensor.ndim == 3 else mask_tensor
+                    if invert_alpha:
+                        m = 1.0 - m
+                    m_np = (m.cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
+                    m_pil = Image.fromarray(m_np, mode="L")
+                    if m_pil.size != (img.width, img.height):
+                        m_pil = m_pil.resize((img.width, img.height), Image.LANCZOS)
+                    img.putalpha(m_pil)
+                elif invert_alpha:
+                    r, g, b, a = img.split()
+                    a = a.point(lambda x: 255 - x)
+                    img = Image.merge("RGBA", (r, g, b, a))
+
+            img = img.convert(target_mode)
+
+            if img.width == expected_size and img.height == expected_size:
+                valid_frames.append((expected_size, img))
+            else:
+                invalid_frames.append((expected_size, img))
+
+        results = []
+
+        if valid_frames:
+            pil_frames = [img for _, img in valid_frames]
+            sizes = [(img.width, img.height) for img in pil_frames]
+            ico_file = f"{filename}_{c:05}_.ico"
+            ico_path = os.path.join(f_output_folder, ico_file)
+
+            save_kwargs: dict = {"sizes": sizes}
+            if compression == "ZIP":
+                # PNG-compressed frames (Windows Vista+ / Pillow extension)
+                save_kwargs["bitmap_format"] = "png"
+
+            pil_frames[0].save(
+                ico_path,
+                format="ICO",
+                append_images=pil_frames[1:],
+                **save_kwargs,
+            )
+            results.append(ui.SavedResult(ico_file, subfolder, io.FolderType.output))
+
+            if save_to_input_folder:
+                os.makedirs(f_input_folder, exist_ok=True)
+                target = os.path.join(f_input_folder, ico_file)
+                if os.path.exists(target):
+                    target = os.path.join(
+                        f_input_folder,
+                        f"{filename}_{c:05}_{int(time.time())}.ico",
+                    )
+                pil_frames[0].save(
+                    target, format="ICO", append_images=pil_frames[1:], **save_kwargs
+                )
+
+            c += 1
+
+        if invalid_frames:
+            if save_invalid_as_png:
+                for expected_size, img in invalid_frames:
+                    png_file = f"{filename}_{c:05}_INVALID.png"
+                    png_img = img.convert("RGBA") if img.mode == "P" else img
+                    png_img.save(os.path.join(f_output_folder, png_file))
+                    results.append(ui.SavedResult(png_file, subfolder, io.FolderType.output))
+                    c += 1
+            else:
+                logger.warning(
+                    f"{cls.debug_header} {len(invalid_frames)} image(s) failed ICO size validation "
+                    f"and were discarded (expected sizes: {[s for s, _ in invalid_frames]}). "
+                    f"Each slot only accepts an image whose dimensions exactly match its label."
+                )
+
+        return io.NodeOutput(ui=ui.SavedImages(results))
+
+
 NODE_CLASS_MAPPINGS = {
     "ColorPatchFlatten": ColorPatchFlatten,
     "ColorPatchMerge": ColorPatchMerge,
     "AchromaticStabilizer": AchromaticStabilizer,
     "LoadICCProfile": LoadICCProfile,
-    "SaveImageAdvanced": SaveImageAdvanced,
+    "SaveImageAdvancedCustom": SaveImageAdvancedCustom,  # Avoid naming conflicts with the official node.
     "SaveImageJPG": SaveImageJPG,
     "SaveImageAdvancedJPG": SaveImageAdvancedJPG,
     "SaveImageBMP": SaveImageBMP,
@@ -2094,6 +2522,8 @@ NODE_CLASS_MAPPINGS = {
     "SaveImageAdvancedTGA": SaveImageAdvancedTGA,
     "SaveImageAVIF": SaveImageAVIF,
     "SaveImageAdvancedAVIF": SaveImageAdvancedAVIF,
+    "SaveImageICO": SaveImageICO,
+    "SaveImageAdvancedICO": SaveImageAdvancedICO,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -2101,7 +2531,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ColorPatchMerge": "Color Patch Merge",
     "AchromaticStabilizer": "Achromatic Stabilizer",
     "LoadICCProfile": "Load ICC Profile",
-    "SaveImageAdvanced": "Save Image Advanced",
+    "SaveImageAdvancedCustom": "Save Image (Custom Advanced)",
     "SaveImageJPG": "Save Image (JPG)",
     "SaveImageAdvancedJPG": "Save Image Advanced (JPG)",
     "SaveImageBMP": "Save Image (BMP)",
@@ -2112,4 +2542,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SaveImageAdvancedTGA": "Save Image Advanced (TGA)",
     "SaveImageAVIF": "Save Image (AVIF)",
     "SaveImageAdvancedAVIF": "Save Image Advanced (AVIF)",
+    "SaveImageICO": "Save Image (ICO)",
+    "SaveImageAdvancedICO": "Save Image Advanced (ICO)",
 }
