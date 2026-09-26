@@ -11,9 +11,7 @@ import os
 from .image_helper import ImageSaveHelperExt
 from .define import define
 
-
-logger = logging.getLogger("ComfyUI-ImageProcess")
-
+logger = logging.getLogger(define.logger_name)
 
 class ColorPatchFlatten(io.ComfyNode):
     """

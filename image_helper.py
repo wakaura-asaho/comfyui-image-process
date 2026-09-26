@@ -13,7 +13,6 @@ import time
 import random
 from datetime import datetime
 
-
 class ImageSaveHelperExt:
     @staticmethod
     def resolve_filename_prefix(
